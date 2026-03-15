@@ -9,7 +9,7 @@ from llama_index.core.schema import MetadataMode, TextNode
 from llama_index.embeddings.huggingface import HuggingFaceEmbedding
 
 from src.parser.text_chunk import ParsedChunk
-from src.retrieval.index_config import IndexConfig
+from src.config.index_config import IndexConfig
 
 
 @dataclass(slots=True)

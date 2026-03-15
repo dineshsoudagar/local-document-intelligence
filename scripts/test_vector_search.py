@@ -6,7 +6,7 @@ from docling.datamodel.base_models import InputFormat
 
 from src.config.parser_config import ParserConfig
 from src.parser.docling_parser import DoclingParser
-from src.retrieval.index_config import IndexConfig
+from src.config.index_config import IndexConfig
 from src.retrieval.vector_index import ChunkVectorIndex
 
 

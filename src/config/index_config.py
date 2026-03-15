@@ -7,7 +7,7 @@ from dataclasses import dataclass
 class IndexConfig:
     persist_dir: str = "storage/vector_index"
     index_id: str = "document_chunks"
-    embedding_model_name: str = "BAAI/bge-small-en-v1.5"
+    embedding_model_name: str = "BAAI/bge-base-en-v1.5"
     similarity_top_k: int = 5
     embed_batch_size: int = 32
     normalize_embeddings: bool = True
