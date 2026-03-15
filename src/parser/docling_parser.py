@@ -5,7 +5,6 @@ from pathlib import Path
 from typing import Any
 
 from docling.chunking import HybridChunker
-from docling.document_converter import DocumentConverter
 
 from src.config.parser_config import ParserConfig
 from src.parser.text_chunk import ParsedChunk
@@ -15,7 +14,7 @@ class DoclingParser:
     def __init__(self, config: ParserConfig) -> None:
         config.validate()
         self._config = config
-        self.text_converter = config.build_text_converter()
+        self._text_converter = config.build_text_converter()
         self._converter = config.build_converter()
         self._tokenizer = config.build_tokenizer()
         self._chunker = HybridChunker(
@@ -24,20 +23,20 @@ class DoclingParser:
         )
 
     def parse(
-            self,
-            source_path: str | Path,
-            doc_id: str | None = None,
+        self,
+        source_path: str | Path,
+        doc_id: str | None = None,
     ) -> list[ParsedChunk]:
         path = Path(source_path)
         if not path.exists():
             raise FileNotFoundError(f"Source not found: {path}")
 
         resolved_doc_id = doc_id or f"doc_{uuid.uuid4().hex[:12]}"
-        document = self._converter.convert(str(path)).document
-        text_doc = self.text_converter.convert(str(path)).document
+        enriched_document = self._converter.convert(str(path)).document
+        text_document = self._text_converter.convert(str(path)).document
 
         chunks = self._extract_text_chunks(
-            document=text_doc,
+            document=text_document,
             doc_id=resolved_doc_id,
             source_file=path.name,
         )
@@ -45,7 +44,7 @@ class DoclingParser:
 
         if self._config.include_picture_chunks:
             picture_chunks = self._extract_picture_chunks(
-                document=document,
+                document=enriched_document,
                 doc_id=resolved_doc_id,
                 source_file=path.name,
                 start_index=len(chunks),
@@ -55,29 +54,19 @@ class DoclingParser:
         return self._reindex_chunks(chunks)
 
     def _extract_text_chunks(
-            self,
-            document: Any,
-            doc_id: str,
-            source_file: str,
+        self,
+        document: Any,
+        doc_id: str,
+        source_file: str,
     ) -> list[ParsedChunk]:
         chunks: list[ParsedChunk] = []
 
         for chunk_index, chunk in enumerate(self._chunker.chunk(dl_doc=document)):
             text = self._chunker.contextualize(chunk=chunk).strip()
-            #if chunk_index < 10:
-            #    print("=====chunk_index=====", chunk_index)
-            #    meta = getattr(chunk, "meta", None)
-            #    doc_items = list(getattr(meta, "doc_items", None) or [])
-            #    print("====meta======", meta)
-            #    print("====doc_items======", doc_items)
-            #    print("=====text=====", text)
-
             if not text:
                 continue
 
             token_count = self._tokenizer.count_tokens(text)
-            if token_count > 256:
-                print(chunk)
             page_start, page_end = self._extract_chunk_page_range(chunk)
             metadata = self._build_text_chunk_metadata(chunk)
             metadata["token_count"] = token_count
@@ -115,35 +104,34 @@ class DoclingParser:
             combined_tokens = self._tokenizer.count_tokens(combined_text)
 
             same_block_type = (
-                    buffer.metadata.get("block_type") == "text"
-                    and current.metadata.get("block_type") == "text"
+                buffer.metadata.get("block_type") == "text"
+                and current.metadata.get("block_type") == "text"
             )
-            same_headings = (
-                    buffer.metadata.get("headings") == current.metadata.get("headings")
-            )
+            same_headings = buffer.metadata.get("headings") == current.metadata.get("headings")
             should_merge = (
-                    buffer_tokens < self._config.min_chunk_tokens
-                    or current_tokens < self._config.min_chunk_tokens
+                buffer_tokens < self._config.min_chunk_tokens
+                or current_tokens < self._config.min_chunk_tokens
             )
 
             if (
-                    same_block_type
-                    and same_headings
-                    and should_merge
-                    and combined_tokens <= self._config.max_chunk_tokens
+                same_block_type
+                and same_headings
+                and should_merge
+                and combined_tokens <= self._config.max_chunk_tokens
             ):
                 buffer = ParsedChunk(
                     chunk_id=buffer.chunk_id,
                     doc_id=buffer.doc_id,
                     source_file=buffer.source_file,
                     chunk_index=buffer.chunk_index,
-                    page_start=buffer.page_start,
-                    page_end=current.page_end,
+                    page_start=self._merge_page_start(buffer.page_start, current.page_start),
+                    page_end=self._merge_page_end(buffer.page_end, current.page_end),
                     text=combined_text,
                     metadata={
                         **buffer.metadata,
                         "token_count": combined_tokens,
                         "merged_small_chunk": True,
+                        "merge_parts": int(buffer.metadata.get("merge_parts", 1)) + 1,
                     },
                 )
                 continue
@@ -159,19 +147,19 @@ class DoclingParser:
         return merged
 
     def _extract_picture_chunks(
-            self,
-            document: Any,
-            doc_id: str,
-            source_file: str,
-            start_index: int,
+        self,
+        document: Any,
+        doc_id: str,
+        source_file: str,
+        start_index: int,
     ) -> list[ParsedChunk]:
         chunks: list[ParsedChunk] = []
         body_root = getattr(document, "body", None)
 
         for item, _level in document.iterate_items(
-                root=body_root,
-                with_groups=False,
-                traverse_pictures=True,
+            root=body_root,
+            with_groups=False,
+            traverse_pictures=True,
         ):
             if not self._is_picture_item(item):
                 continue
@@ -321,6 +309,22 @@ class DoclingParser:
             return None, None
 
         return min(page_numbers), max(page_numbers)
+
+    @staticmethod
+    def _merge_page_start(left: int | None, right: int | None) -> int | None:
+        if left is None:
+            return right
+        if right is None:
+            return left
+        return min(left, right)
+
+    @staticmethod
+    def _merge_page_end(left: int | None, right: int | None) -> int | None:
+        if left is None:
+            return right
+        if right is None:
+            return left
+        return max(left, right)
 
     @staticmethod
     def _reindex_chunks(chunks: list[ParsedChunk]) -> list[ParsedChunk]:
