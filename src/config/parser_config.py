@@ -15,9 +15,9 @@ from transformers import AutoTokenizer
 
 @dataclass(slots=True)
 class ParserConfig:
-    max_chunk_tokens: int = 220
+    chunk_tokenizer_model: str = "Qwen/Qwen3-Embedding-0.6B"
+    max_chunk_tokens: int = 260
     min_chunk_tokens: int = 80
-    chunk_tokenizer_model: str = "BAAI/bge-base-en-v1.5"
 
     allowed_formats: list[InputFormat] = field(
         default_factory=lambda: [

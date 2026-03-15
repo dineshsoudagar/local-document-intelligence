@@ -1,32 +1,42 @@
 from __future__ import annotations
 
 import argparse
+from pathlib import Path
 
 from docling.datamodel.base_models import InputFormat
 
+from src.config.index_config import IndexConfig
 from src.config.parser_config import ParserConfig
 from src.parser.docling_parser import DoclingParser
-from src.config.index_config import IndexConfig
-from src.retrieval.vector_index import ChunkVectorIndex
+from src.retrieval.qdrant_hybrid_index import QdrantHybridIndex
 
 
-def print_results(results: list, preview_chars: int = 700) -> None:
+def print_results(results: list, preview_chars: int | None = None) -> None:
     if not results:
         print("No results found.")
         return
 
     for rank, item in enumerate(results, start=1):
         print("=" * 100)
-        print(f"rank       : {rank}")
-        print(f"score      : {item.score}")
-        print(f"chunk_id   : {item.chunk_id}")
-        print(f"source_file: {item.source_file}")
-        print(f"pages      : {item.page_start} -> {item.page_end}")
-        print(f"block_type : {item.metadata.get('block_type')}")
-        print(f"headings   : {item.metadata.get('headings')}")
+        print(f"rank         : {rank}")
+        print(f"rerank_score : {item.rerank_score}")
+        print(f"fusion_score : {item.fused_score}")
+        print(f"chunk_id     : {item.chunk_id}")
+        print(f"source_file  : {item.source_file}")
+        print(f"pages        : {item.page_start} -> {item.page_end}")
+        print(f"block_type   : {item.metadata.get('block_type')}")
+        print(f"headings     : {item.metadata.get('headings')}")
         print("preview:")
-        print(item.text[:preview_chars])
+        if preview_chars:
+            print(item.text[:preview_chars])
+        else:
+            print(item.text)
         print()
+
+
+def build_doc_id(path: str) -> str:
+    pdf_path = Path(path)
+    return pdf_path.stem.strip().replace(" ", "_").replace("-", "_").lower()
 
 
 def main() -> None:
@@ -38,30 +48,18 @@ def main() -> None:
 
     parser_config = ParserConfig(
         allowed_formats=[InputFormat.PDF],
-        enable_picture_description=True,
+        enable_picture_description=False,
         include_picture_chunks=True,
     )
-
     parser = DoclingParser(parser_config)
 
-    index_config = IndexConfig()
-    vector_index = ChunkVectorIndex(index_config)
+    index = QdrantHybridIndex(IndexConfig())
 
-    chunks = None
-    if args.rebuild:
-        chunks = parser.parse(args.pdf)
+    if args.rebuild or not index.collection_exists():
+        chunks = parser.parse(args.pdf, doc_id=build_doc_id(args.pdf))
+        index.build(chunks=chunks, rebuild=args.rebuild)
 
-    try:
-        index = vector_index.build_or_load(chunks=chunks, rebuild=args.rebuild)
-    except FileNotFoundError:
-        chunks = parser.parse(args.pdf)
-        index = vector_index.build(chunks=chunks)
-
-    results = vector_index.search(
-        query=args.query,
-        index=index,
-    )
-
+    results = index.search(query=args.query)
     print_results(results)
 
 
