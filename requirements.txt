@@ -2,3 +2,6 @@ llama-index
 llama-index-readers-file
 pymupdf
 pypdf
+docling
+transformers~=4.57.6
+llama-index-core~=0.14.17

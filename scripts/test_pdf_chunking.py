@@ -6,6 +6,8 @@ from pathlib import Path
 from src.config.parser_config import ParserConfig
 from src.parser.factory import build_parser
 from src.utils.io import write_json
+from src.parser.docling_parser import DoclingParser
+from docling.datamodel.base_models import InputFormat
 
 
 def inspect_chunks(chunks: list, limit: int = 5, preview_chars: int = 700) -> None:
@@ -24,18 +26,26 @@ def main() -> None:
     cli = argparse.ArgumentParser()
     cli.add_argument("--pdf", required=True, help="Path to the PDF file")
     cli.add_argument("--parser", default="docling", choices=["docling", "pymupdf"])
-    cli.add_argument("--chunk-size", type=int, default=512)
+    cli.add_argument("--chunk-size", type=int, default=200)
     cli.add_argument("--chunk-overlap", type=int, default=64)
     cli.add_argument("--inspect-limit", type=int, default=5)
     cli.add_argument("--output-json", default=None)
     args = cli.parse_args()
 
     config = ParserConfig(
-        chunk_size=args.chunk_size,
-        chunk_overlap=args.chunk_overlap,
+        max_chunk_tokens=args.chunk_size,
+        min_chunk_tokens=150,
+        allowed_formats=[
+            InputFormat.PDF,
+            InputFormat.DOCX,
+            InputFormat.MD,
+            InputFormat.IMAGE,
+        ],
+        enable_picture_description=True,
+        include_picture_chunks=True
     )
 
-    parser = build_parser(args.parser, config)
+    parser = DoclingParser(config)
     chunks = parser.parse(args.pdf)
 
     if not args.output_json:
