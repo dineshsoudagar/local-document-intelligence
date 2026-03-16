@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import argparse
 from pathlib import Path
-
+import time
 from docling.datamodel.base_models import InputFormat
 
 from src.config.index_config import IndexConfig
@@ -44,6 +44,7 @@ def main() -> None:
     cli.add_argument("--pdf", required=True, help="Path to the PDF file")
     cli.add_argument("--query", required=True, help="Query text")
     cli.add_argument("--rebuild", action="store_true")
+    cli.add_argument("--debug", action="store_true")
     args = cli.parse_args()
 
     parser_config = ParserConfig(
@@ -59,8 +60,35 @@ def main() -> None:
         chunks = parser.parse(args.pdf, doc_id=build_doc_id(args.pdf))
         index.build(chunks=chunks, rebuild=args.rebuild)
 
+    search_start = time.perf_counter()
+
+    if args.debug:
+        debug = index.debug_search(args.query)
+
+        for stage_name in ["dense", "sparse", "fused", "reranked"]:
+            print(f"\n{'#' * 30} {stage_name.upper()} {'#' * 30}")
+            for rank, item in enumerate(debug[stage_name][:10], start=1):
+                print("-" * 100)
+                print(f"rank    : {rank}")
+                print(f"chunk_id : {item['chunk_id']}")
+                print(f"score    : {item.get('score', item.get('fusion_score'))}")
+                if "rerank_score" in item:
+                    print(f"rerank   : {item['rerank_score']}")
+                    print(f"fusion   : {item['fusion_score']}")
+                print(f"pages    : {item['pages']}")
+                print(f"headings : {item['headings']}")
+                print("preview:")
+                print(item["preview"])
+
+        search_elapsed = time.perf_counter() - search_start
+        print(f"\nsearch_time_seconds: {search_elapsed:.3f}")
+        return
+
     results = index.search(query=args.query)
     print_results(results)
+
+    search_elapsed = time.perf_counter() - search_start
+    print(f"\nsearch_time_seconds: {search_elapsed:.3f}")
 
 
 if __name__ == "__main__":

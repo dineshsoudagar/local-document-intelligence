@@ -174,6 +174,111 @@ class QdrantHybridIndex:
         )
         return rescored[:final_limit]
 
+    def debug_search(self, query: str, max_text_len: int = -1) -> dict[str, list[dict[str, Any]]]:
+        dense_query = self._embedder.encode_query(query)
+        sparse_query = models.Document(
+            text=query,
+            model=self._config.sparse_model_name,
+        )
+
+        dense_response = self._client.query_points(
+            collection_name=self._config.collection_name,
+            query=dense_query,
+            using=self._config.dense_vector_name,
+            limit=self._config.dense_top_k,
+            with_payload=True,
+        )
+
+        sparse_response = self._client.query_points(
+            collection_name=self._config.collection_name,
+            query=sparse_query,
+            using=self._config.sparse_vector_name,
+            limit=self._config.sparse_top_k,
+            with_payload=True,
+        )
+
+        fused_response = self._client.query_points(
+            collection_name=self._config.collection_name,
+            prefetch=[
+                models.Prefetch(
+                    query=sparse_query,
+                    using=self._config.sparse_vector_name,
+                    limit=self._config.sparse_top_k,
+                ),
+                models.Prefetch(
+                    query=dense_query,
+                    using=self._config.dense_vector_name,
+                    limit=self._config.dense_top_k,
+                ),
+            ],
+            query=models.FusionQuery(fusion=models.Fusion.RRF),
+            limit=self._config.fused_top_k,
+            with_payload=True,
+        )
+
+        fused_candidates = [self._scored_point_to_result(point) for point in fused_response.points]
+        reranker = self._get_reranker()
+        rerank_scores = reranker.score(
+            query=query,
+            documents=[candidate.text for candidate in fused_candidates],
+            instruction=self._config.rerank_instruction,
+        )
+
+        reranked = []
+        for candidate, rerank_score in zip(fused_candidates, rerank_scores):
+            reranked.append(
+                {
+                    "chunk_id": candidate.chunk_id,
+                    "headings": candidate.metadata.get("headings"),
+                    "pages": (candidate.page_start, candidate.page_end),
+                    "fusion_score": candidate.fused_score,
+                    "rerank_score": rerank_score,
+                    "preview": candidate.text[:max_text_len],
+                }
+            )
+
+        reranked.sort(
+            key=lambda item: (
+                item["rerank_score"] if item["rerank_score"] is not None else float("-inf"),
+                item["fusion_score"] if item["fusion_score"] is not None else float("-inf"),
+            ),
+            reverse=True,
+        )
+
+        return {
+            "dense": [
+                {
+                    "chunk_id": str((point.payload or {}).get("chunk_id") or point.id),
+                    "score": point.score,
+                    "headings": (point.payload or {}).get("headings"),
+                    "pages": ((point.payload or {}).get("page_start"), (point.payload or {}).get("page_end")),
+                    "preview": str((point.payload or {}).get("text", ""))[:max_text_len],
+                }
+                for point in dense_response.points
+            ],
+            "sparse": [
+                {
+                    "chunk_id": str((point.payload or {}).get("chunk_id") or point.id),
+                    "score": point.score,
+                    "headings": (point.payload or {}).get("headings"),
+                    "pages": ((point.payload or {}).get("page_start"), (point.payload or {}).get("page_end")),
+                    "preview": str((point.payload or {}).get("text", ""))[:max_text_len],
+                }
+                for point in sparse_response.points
+            ],
+            "fused": [
+                {
+                    "chunk_id": candidate.chunk_id,
+                    "score": candidate.fused_score,
+                    "headings": candidate.metadata.get("headings"),
+                    "pages": (candidate.page_start, candidate.page_end),
+                    "preview": candidate.text[:max_text_len],
+                }
+                for candidate in fused_candidates
+            ],
+            "reranked": reranked,
+        }
+
     def _create_collection(self) -> None:
         self._client.create_collection(
             collection_name=self._config.collection_name,
