@@ -1,0 +1,249 @@
+# Retrieval Build Notes and Learnings
+
+## Quick Summary
+
+- Built a local retrieval pipeline for document chunk search over parsed document chunks.
+- Parser uses **Docling** for chunking and metadata extraction.
+- Retrieval stack uses:
+  - **Dense retrieval** with **Qwen/Qwen3-Embedding-0.6B**
+  - **Sparse retrieval** with **BM25**
+  - **Fusion** using **RRF**
+  - **Reranking** with **Qwen/Qwen3-Reranker-0.6B**
+  - **Qdrant** as the local vector database
+- Retrieval evaluation on the RAG paper was strong:
+  - **Top-5 hit rate:** 11/12
+  - **Top-2 hit rate:** 10/12
+- Main insight: retrieval is already good enough for the current stage.
+- Real next test is **multi-document retrieval**, not more tuning on one paper.
+- Next major step: add the **generator model** and evaluate final answer quality.
+
+---
+
+## What We Built
+
+### 1. Chunking Pipeline
+We finalized a chunking setup using **DoclingParser** and a clean `ParserConfig`.
+
+Key points:
+- Chunking is token-based, not overlap-based.
+- Chunk metadata includes:
+  - chunk id
+  - source file
+  - chunk index
+  - page range
+  - headings
+  - block type
+- Text chunks and image/picture chunks are handled separately.
+- We kept the parser extensible for PDF, DOCX, Markdown, HTML, and image inputs.
+
+### 2. Retrieval Stack
+We moved from a simple dense-only retriever to a stronger hybrid pipeline.
+
+Final retrieval design:
+- **Dense retriever:** semantic retrieval using embeddings
+- **Sparse retriever:** lexical retrieval using BM25
+- **Fusion:** combine dense and sparse rankings using **RRF**
+- **Reranker:** second-stage relevance scoring over fused candidates
+- **Vector DB:** local **Qdrant**
+
+This gave a much stronger retrieval system than dense-only search.
+
+---
+
+## Important Technical Decisions
+
+### Dense vs Sparse vs Fused
+- **Dense retrieval** finds semantically related chunks.
+- **Sparse retrieval (BM25)** finds chunks with exact or near-exact lexical matches.
+- **Fused retrieval** combines both rankings, giving better recall than either alone.
+
+This matters because:
+- semantic retrieval is good for paraphrases and concepts
+- BM25 is good for exact terms, acronyms, and definitions
+- fusion improves the candidate pool before reranking
+
+### Reranking
+We clarified that reranking is:
+- a **second-stage model**
+- usually a **cross-encoder-like relevance scorer**
+- used only on the top retrieved candidates
+- not a replacement for retrieval, but a refinement step
+
+Important learning:
+- reranking improves **ranking precision**
+- reranking does **not fix recall**
+- if the correct chunk is not retrieved at all, reranking cannot recover it
+
+### Qdrant Point ID Bug
+We hit an issue where Qdrant rejected chunk ids like:
+- `rag_paper_chunk_0000`
+
+Root cause:
+- Qdrant local requires point ids to be valid UUIDs or integers
+- our custom string ids were invalid as point ids
+
+Fix:
+- keep readable `chunk_id` inside payload
+- generate deterministic UUIDs for Qdrant point ids using `uuid.uuid5(...)`
+
+We also found a duplicate `_build_point()` method that silently overwrote the correct version. That was the actual bug.
+
+---
+
+## What We Learned During Retrieval Building
+
+### 1. Bad retrieval diagnosis is easy if you do not inspect stages separately
+A major learning was that retrieval must be debugged **stage by stage**:
+- dense
+- sparse
+- fused
+- reranked
+
+Without that, it is too easy to blame the wrong part.
+
+### 2. One query is not enough to judge retrieval quality
+We initially focused on:
+- “What does RAG stand for?”
+
+That was useful, but misleading if treated as a full evaluation.
+A small question set gave a much better view of system quality.
+
+### 3. Retrieval evaluation should target chunks, not final verbal answers
+This was an important correction.
+
+For retrieval evaluation, the target is:
+- the correct chunk
+- the correct section/heading
+- or an adjacent chunk containing the answer-bearing sentence
+
+It is **not** the final generated answer.
+
+### 4. Dense-only retrieval is not enough
+Dense retrieval alone was too weak for:
+- acronym expansion
+- exact definitions
+- highly lexical questions
+
+Adding:
+- BM25
+- fusion
+- reranking
+
+made the system much more reliable.
+
+### 5. BM25 is useful even in a modern embedding-based pipeline
+BM25 helped especially with:
+- exact phrase lookup
+- acronym-related questions
+- keyword-heavy retrieval cases
+
+Dense retrieval and BM25 solve different problems.
+Using both was the right choice.
+
+### 6. Reranker was valuable, but not magic
+The reranker often rescued the final ranking, especially when the correct chunk was present but not highly ranked.
+
+But it also showed that:
+- first-stage retrieval quality still matters
+- reranking is not enough if dense/sparse retrieval surfaces noisy candidates
+
+### 7. Retrieval quality on one document is not the real benchmark
+The RAG paper evaluation showed the pipeline works.
+But the real test will be:
+- many documents in the DB
+- overlapping terminology
+- distractor chunks
+- cross-document ambiguity
+
+That is the next meaningful retrieval benchmark.
+
+---
+
+## Evaluation Outcome
+
+We tested the retrieval pipeline on the uploaded **RAG paper** using a curated set of questions.
+
+Result:
+- retrieval passed almost all tests
+- most correct chunks were in **top 2**
+- the system reliably found answer-bearing chunks
+
+Interpretation:
+- the retrieval stage is already strong enough to move forward
+- more tuning right now is low-value compared to adding more documents and then testing again
+
+---
+
+## Current Weak Points
+
+Even though the retrieval is strong, the main weaknesses are:
+
+1. **Single-document evaluation bias**
+   - retrieval is easier when only one document exists
+
+2. **Definition / lexical questions**
+   - these still expose ranking weaknesses more than semantic questions
+
+3. **Chunk granularity**
+   - sometimes the right answer exists in a nearby chunk or a broader section rather than the exact chunk we hoped for
+
+4. **No final answer generation yet**
+   - current evaluation only checks retrieval quality, not answer synthesis quality
+
+---
+
+## What We Should Not Waste Time On Right Now
+
+- over-optimizing reranker prompts
+- tuning retrieval on one paper forever
+- changing models again without new evidence
+- chasing perfect top-1 ranking on the current single-document setup
+
+That would be premature.
+
+---
+
+## Next Steps
+
+### Immediate next step
+Add more documents into the database and repeat the same evaluation.
+
+This will test:
+- cross-document retrieval
+- distractor resistance
+- chunk confusion across papers
+- whether top-5 performance still holds
+
+### After that
+Add the generator model and evaluate:
+- answer correctness
+- faithfulness to retrieved chunks
+- whether the generator uses the evidence properly
+
+### Future evaluation should separately track
+1. retrieval correctness
+2. answer correctness
+3. citation correctness
+
+---
+
+## Final Takeaway
+
+The retrieval system is no longer a prototype that merely runs.
+
+It is now a functioning local retrieval pipeline with:
+- structured chunking
+- metadata-aware indexing
+- hybrid retrieval
+- reranking
+- reproducible evaluation
+
+The main lesson is that strong retrieval comes from combining:
+- good chunking
+- dense retrieval
+- sparse retrieval
+- fusion
+- reranking
+- evaluation with real questions
+
+At this point, retrieval is good enough to stop tuning and move to the next phase: **multi-document testing and answer generation**.
