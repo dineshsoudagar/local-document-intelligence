@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-"""Model wrappers for dense embeddings and reranking."""
+"""Local Qwen model wrappers for embedding, reranking, and generation."""
 
 from typing import Sequence
 
@@ -10,7 +10,7 @@ from transformers import AutoModelForCausalLM, AutoTokenizer
 
 
 class QwenDenseEmbedder:
-    """Wrap the embedding model used for dense retrieval."""
+    """Sentence-transformers wrapper for dense embedding generation."""
 
     def __init__(
         self,
@@ -35,11 +35,11 @@ class QwenDenseEmbedder:
 
     @property
     def dimension(self) -> int:
-        """Return embedding dimensionality for collection creation."""
+        """Return the embedding dimensionality."""
         return int(self._model.get_sentence_embedding_dimension())
 
     def encode_documents(self, texts: Sequence[str]) -> list[list[float]]:
-        """Encode document texts for indexing."""
+        """Encode document texts into normalized dense embeddings."""
         embeddings = self._model.encode(
             list(texts),
             batch_size=self._batch_size,
@@ -50,7 +50,7 @@ class QwenDenseEmbedder:
         return embeddings.tolist()
 
     def encode_query(self, query: str) -> list[float]:
-        """Encode a query for dense retrieval."""
+        """Encode a search query into a normalized dense embedding."""
         embedding = self._model.encode(
             [query],
             batch_size=1,
@@ -63,7 +63,7 @@ class QwenDenseEmbedder:
 
 
 class QwenReranker:
-    """Wrap the reranker model used after hybrid candidate retrieval."""
+    """Causal-LM-based yes/no reranker for query-document relevance scoring."""
 
     def __init__(
         self,
@@ -79,6 +79,7 @@ class QwenReranker:
             model_name,
             padding_side="left",
         )
+        self._pad_token_id = self._resolve_pad_token_id()
 
         model_kwargs = {}
         if self._device.type == "cuda":
@@ -90,7 +91,6 @@ class QwenReranker:
         ).eval()
         self._model.to(self._device)
 
-        # Reranking is modeled as a yes/no decision on the next token.
         self._token_false_id = self._tokenizer.convert_tokens_to_ids("no")
         self._token_true_id = self._tokenizer.convert_tokens_to_ids("yes")
 
@@ -100,15 +100,8 @@ class QwenReranker:
             'only be "yes" or "no".<|im_end|>\n<|im_start|>user\n'
         )
         self._suffix = '<|im_end|>\n<|im_start|>assistant\n<think>\n\n</think>\n\n'
-
-        self._prefix_tokens = self._tokenizer.encode(
-            self._prefix,
-            add_special_tokens=False,
-        )
-        self._suffix_tokens = self._tokenizer.encode(
-            self._suffix,
-            add_special_tokens=False,
-        )
+        self._prefix_tokens = self._encode_text(self._prefix)
+        self._suffix_tokens = self._encode_text(self._suffix)
 
     def score(
         self,
@@ -116,7 +109,7 @@ class QwenReranker:
         documents: Sequence[str],
         instruction: str,
     ) -> list[float]:
-        """Score candidate documents against the user query."""
+        """Return yes-probability relevance scores for the supplied documents."""
         pairs = [
             self._format_pair(instruction=instruction, query=query, document=text)
             for text in documents
@@ -132,48 +125,70 @@ class QwenReranker:
 
     @staticmethod
     def _format_pair(instruction: str, query: str, document: str) -> str:
-        """Format one query-document pair for the reranker prompt."""
+        """Format a reranking sample as instruction, query, and document text."""
         return (
             f"<Instruct>: {instruction}\n"
             f"<Query>: {query}\n"
             f"<Document>: {document}"
         )
 
+    def _encode_text(self, text: str) -> list[int]:
+        """Encode a prompt fragment without adding tokenizer-specific special tokens."""
+        return self._tokenizer(text, add_special_tokens=False)["input_ids"]
+
+    def _resolve_pad_token_id(self) -> int:
+        """Return a valid pad token id for batch collation."""
+        if self._tokenizer.pad_token_id is not None:
+            return int(self._tokenizer.pad_token_id)
+        if self._tokenizer.eos_token_id is not None:
+            return int(self._tokenizer.eos_token_id)
+        raise ValueError("Tokenizer must define pad_token_id or eos_token_id")
+
     def _prepare_inputs(self, pairs: Sequence[str]) -> dict[str, torch.Tensor]:
-        """Tokenize, frame, and pad reranker inputs."""
+        """Tokenize, truncate body text, and batch inputs without tokenizer.pad."""
         max_body_length = (
             self._max_length - len(self._prefix_tokens) - len(self._suffix_tokens)
         )
-
-        inputs = self._tokenizer(
+        encoded_pairs = self._tokenizer(
             list(pairs),
+            add_special_tokens=False,
             padding=False,
-            truncation="longest_first",
-            return_attention_mask=False,
+            truncation=True,
             max_length=max_body_length,
+            return_attention_mask=False,
         )
 
-        for i, token_ids in enumerate(inputs["input_ids"]):
-            inputs["input_ids"][i] = (
-                self._prefix_tokens + token_ids + self._suffix_tokens
-            )
+        sequences: list[list[int]] = []
+        for token_ids in encoded_pairs["input_ids"]:
+            sequences.append(self._prefix_tokens + token_ids + self._suffix_tokens)
 
-        padded = self._tokenizer.pad(
-            inputs,
-            padding=True,
-            return_tensors="pt",
+        max_seq_len = max(len(sequence) for sequence in sequences)
+        input_ids = torch.full(
+            (len(sequences), max_seq_len),
+            fill_value=self._pad_token_id,
+            dtype=torch.long,
         )
-        return {key: value.to(self._device) for key, value in padded.items()}
+        attention_mask = torch.zeros(
+            (len(sequences), max_seq_len),
+            dtype=torch.long,
+        )
+
+        for row_index, sequence in enumerate(sequences):
+            sequence_tensor = torch.tensor(sequence, dtype=torch.long)
+            input_ids[row_index, -len(sequence) :] = sequence_tensor
+            attention_mask[row_index, -len(sequence) :] = 1
+
+        return {
+            "input_ids": input_ids.to(self._device),
+            "attention_mask": attention_mask.to(self._device),
+        }
 
     @torch.inference_mode()
     def _compute_scores(self, inputs: dict[str, torch.Tensor]) -> list[float]:
-        """Return yes-probabilities for the prepared inputs."""
+        """Compute yes-probability scores from the final-token logits."""
         logits = self._model(**inputs).logits[:, -1, :]
-
         true_logits = logits[:, self._token_true_id]
         false_logits = logits[:, self._token_false_id]
-
         yes_no_logits = torch.stack([false_logits, true_logits], dim=1)
         probabilities = torch.softmax(yes_no_logits, dim=1)[:, 1]
-
         return probabilities.float().cpu().tolist()

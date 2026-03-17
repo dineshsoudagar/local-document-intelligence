@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-"""Index configuration for storage paths, model paths, and retrieval limits."""
+"""Index configuration for local retrieval models, storage, and ranking limits."""
 
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -9,13 +9,14 @@ from src.config.model_catalog import ModelCatalog
 
 
 def _default_project_root() -> Path:
-    """Resolve the repository root from the current config file location."""
+    """Return the repository root based on the config file location."""
     return Path(__file__).resolve().parents[2]
 
 
 @dataclass(slots=True)
 class IndexConfig:
-    """Central configuration for the hybrid retrieval index."""
+    """Configuration for the hybrid Qdrant retrieval pipeline."""
+
     project_root: Path = field(default_factory=_default_project_root)
     model_catalog: ModelCatalog = field(default_factory=ModelCatalog)
 
@@ -50,52 +51,36 @@ class IndexConfig:
     show_progress: bool = True
 
     def __post_init__(self) -> None:
-        """Normalize the configured project root once at initialization."""
+        """Normalize paths once so runtime resolution stays deterministic."""
         self.project_root = Path(self.project_root).resolve()
 
     @property
     def qdrant_path(self) -> str:
-        """Resolve the effective Qdrant path, with override support."""
+        """Return the resolved local Qdrant storage path."""
         if self.qdrant_path_override is not None:
             return str(Path(self.qdrant_path_override).resolve())
         return str((self.project_root / self.qdrant_relative_path).resolve())
 
     @property
     def dense_model_name(self) -> str:
-        """Resolve the active dense model path."""
+        """Return the resolved local dense embedder path."""
         if self.dense_model_name_override is not None:
-            return str(self.dense_model_name_override)
-        return self._resolve_model_path("embedder")
+            return str(Path(self.dense_model_name_override).resolve())
+        return str(self.model_catalog.embedder_path(self.project_root))
 
     @property
     def reranker_model_name(self) -> str:
-        """Resolve the active reranker model path."""
+        """Return the resolved local reranker path."""
         if self.reranker_model_name_override is not None:
-            return str(self.reranker_model_name_override)
-        return self._resolve_model_path("reranker")
-
-    def _resolve_model_path(self, key: str) -> str:
-        """Resolve a catalog entry into a concrete local model directory."""
-        entry = self.model_catalog.get(key)
-        return str(
-            entry.resolve_dir(
-                project_root=self.project_root,
-                models_root=self.model_catalog.models_root,
-            )
-        )
+            return str(Path(self.reranker_model_name_override).resolve())
+        return str(self.model_catalog.reranker_path(self.project_root))
 
     def validate(self) -> None:
-        """Fail fast on invalid index configuration."""
+        """Validate configuration values and fail early on broken local paths."""
         if not self.collection_name:
             raise ValueError("collection_name must not be empty")
         if not self.sparse_model_name:
             raise ValueError("sparse_model_name must not be empty")
-        if not self.qdrant_path:
-            raise ValueError("qdrant_path must not be empty")
-        if not self.dense_model_name:
-            raise ValueError("dense_model_name must not be empty")
-        if not self.reranker_model_name:
-            raise ValueError("reranker_model_name must not be empty")
         if self.dense_batch_size <= 0:
             raise ValueError("dense_batch_size must be greater than 0")
         if self.upsert_batch_size <= 0:
@@ -114,3 +99,11 @@ class IndexConfig:
             raise ValueError("final_top_k must be greater than 0")
         if self.final_top_k > self.fused_top_k:
             raise ValueError("final_top_k must be smaller than or equal to fused_top_k")
+
+        dense_path = Path(self.dense_model_name)
+        reranker_path = Path(self.reranker_model_name)
+
+        if not dense_path.exists():
+            raise FileNotFoundError(f"Dense model path does not exist: {dense_path}")
+        if not reranker_path.exists():
+            raise FileNotFoundError(f"Reranker model path does not exist: {reranker_path}")
