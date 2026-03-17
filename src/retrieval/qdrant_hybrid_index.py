@@ -68,7 +68,7 @@ class QdrantHybridIndex:
 
         # Embeddings and upserts run in batches to keep memory predictable.
         for start in range(0, len(filtered_chunks), self._config.upsert_batch_size):
-            batch_chunks = filtered_chunks[start : start + self._config.upsert_batch_size]
+            batch_chunks = filtered_chunks[start: start + self._config.upsert_batch_size]
             batch_texts = [chunk.text for chunk in batch_chunks]
             batch_dense_vectors = self._embedder.encode_documents(batch_texts)
 
@@ -87,10 +87,10 @@ class QdrantHybridIndex:
             )
 
     def _build_point(
-        self,
-        chunk: ParsedChunk,
-        dense_vector: list[float],
-        avg_doc_len: float,
+            self,
+            chunk: ParsedChunk,
+            dense_vector: list[float],
+            avg_doc_len: float,
     ) -> models.PointStruct:
         """Convert one parsed chunk into one Qdrant point."""
         return models.PointStruct(
@@ -352,3 +352,46 @@ class QdrantHybridIndex:
                 max_length=self._config.reranker_max_length,
             )
         return self._reranker
+
+    def _doc_filter(self, doc_id: str) -> models.Filter:
+        """Return a Qdrant filter that matches one logical document."""
+        return models.Filter(
+            must=[
+                models.FieldCondition(
+                    key="doc_id",
+                    match=models.MatchValue(value=doc_id),
+                )
+            ]
+        )
+
+    def document_exists(self, doc_id: str) -> bool:
+        """Return whether at least one chunk for the document exists."""
+        if not self.collection_exists():
+            return False
+
+        records, _ = self._client.scroll(
+            collection_name=self._config.collection_name,
+            scroll_filter=self._doc_filter(doc_id),
+            limit=1,
+            with_payload=False,
+            with_vectors=False,
+        )
+        return len(records) > 0
+
+    def delete_document(self, doc_id: str) -> None:
+        """Delete all indexed chunks for one document."""
+        if not self.collection_exists():
+            return
+
+        self._client.delete(
+            collection_name=self._config.collection_name,
+            points_selector=models.FilterSelector(
+                filter=self._doc_filter(doc_id),
+            ),
+            wait=True,
+        )
+
+    def clear(self) -> None:
+        """Delete the entire collection."""
+        if self.collection_exists():
+            self._client.delete_collection(self._config.collection_name)

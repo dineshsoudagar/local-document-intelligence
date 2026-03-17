@@ -1,0 +1,45 @@
+(local_int_venv) PS C:\Others\Projects\local-document-intelligence> python .\scripts\answer_query.py --query "who is dinesh and where does he work currently?"
+`torch_dtype` is deprecated! Use `dtype` instead!
+Loading checkpoint shards: 100%|██████████████████████████████████████████████████████████████████████████████████| 3/3 [00:03<00:00,  1.05s/it]
+The following generation flags are not valid and may be ignored: ['temperature', 'top_p', 'top_k']. Set `TRANSFORMERS_VERBOSITY=info` for more details.
+######################################## ANSWER ########################################
+Dinesh Soudagar is an AI engineer and ML Engineer specializing in computer vision and autonomous driving. He currently works at IAV GmbH in Germany as an AI Development Engineer [6].
+
+Sources:
+  [1] dinesh d cv.pdf | pages 1 | chunk_id=dinesh_d_cv_f0a4546ab245_chunk_0007 | block_type=text | headings=DINESH SOUDAGAR | rerank=0.9028 | fusion=0.8333
+  [2] cv.pdf | pages 1 | chunk_id=cv_6209ed933ba6_chunk_0000 | block_type=text | headings=- | rerank=0.7417 | fusion=0.8333
+  [3] cv.pdf | pages 1 | chunk_id=cv_6209ed933ba6_chunk_0004 | block_type=text | headings=About Me | rerank=0.0053 | fusion=0.1000
+  [4] dinesh d cv.pdf | pages 2 | chunk_id=dinesh_d_cv_f0a4546ab245_chunk_0015 | block_type=text | headings=Quality Assurance Engineer, Toyota Kirloskar Motor (Bangalore, India) | Nov 2014 - Sep 2019 | rerank=0.0036 | fusion=0.1111
+  [5] cv.pdf | pages 2 | chunk_id=cv_6209ed933ba6_chunk_0016 | block_type=text | headings=Quality Assurance Engineer,  Toyota Kirloskar Motor (Bangalore, India). | rerank=0.0014 | fusion=0.1250
+  [6] dinesh d cv.pdf | pages 1 | chunk_id=dinesh_d_cv_f0a4546ab245_chunk_0002 | block_type=text | headings=Professional Experience | rerank=0.0013 | fusion=0.2500
+  [7] RAG_vs_long_text.pdf | pages 13 | chunk_id=rag_vs_long_text_c11d5fed03df_chunk_0082 | block_type=text | headings=C Prompts | rerank=0.0005 | fusion=0.1429
+  [8] dinesh d cv.pdf | pages 2 | chunk_id=dinesh_d_cv_f0a4546ab245_chunk_0014 | block_type=text | headings=Education | rerank=0.0002 | fusion=0.0625
+  [9] cv.pdf | pages 1 | chunk_id=cv_6209ed933ba6_chunk_0006 | block_type=text | headings=Scenario Generator: | rerank=0.0002 | fusion=0.2000
+  [10] dinesh d cv.pdf | pages 2 | chunk_id=dinesh_d_cv_f0a4546ab245_chunk_0008 | block_type=text | headings=Synthetic Traffic Scenario Generator | Stable Diffusion | IAV GmbH | rerank=0.0002 | fusion=0.2500
+
+timings: retrieval=1.617s, generation=1.971s, pipeline=7.151s
+(local_int_venv) PS C:\Others\Projects\local-document-intelligence>
+
+###########################################################################################################
+(local_int_venv) PS C:\Others\Projects\local-document-intelligence> python .\scripts\answer_query.py --query "who is dinesh and where does he work currently?"
+`torch_dtype` is deprecated! Use `dtype` instead!
+Loading checkpoint shards: 100%|██████████████████████████████████████████████████████████████████████████████████| 3/3 [00:03<00:00,  1.02s/it]
+The following generation flags are not valid and may be ignored: ['temperature', 'top_p', 'top_k']. Set `TRANSFORMERS_VERBOSITY=info` for more details.
+######################################## ANSWER ########################################
+Dinesh Soudagar is a Machine Learning Engineer specializing in Computer Vision and Autonomous Driving. He currently works in Dresden, Germany, an
+d is open to relocating. The provided context does not specify his current employer, only that he has previously worked as a Quality Assurance En
+gineer at Toyota Kirloskar Motor in Bangalore, India [4]. Therefore, based on the information available, his current workplace is not explicitly stated.
+
+Sources:
+  [1] dinesh d cv.pdf | pages 1 | chunk_id=dinesh_d_cv_f0a4546ab245_chunk_0007 | block_type=text | headings=DINESH SOUDAGAR | rerank=0.9028 | fusion=0.8333
+  [2] cv.pdf | pages 1 | chunk_id=cv_6209ed933ba6_chunk_0000 | block_type=text | headings=- | rerank=0.7417 | fusion=0.8333
+  [3] cv.pdf | pages 1 | chunk_id=cv_6209ed933ba6_chunk_0004 | block_type=text | headings=About Me | rerank=0.0053 | fusion=0.1000
+  [4] dinesh d cv.pdf | pages 2 | chunk_id=dinesh_d_cv_f0a4546ab245_chunk_0015 | block_type=text | headings=Quality Assurance Engineer, Toyota Kirloskar Motor (Bangalore, India) | Nov 2014 - Sep 2019 | rerank=0.0036 | fusion=0.1111
+  [5] cv.pdf | pages 2 | chunk_id=cv_6209ed933ba6_chunk_0016 | block_type=text | headings=Quality Assurance Engineer,  Toyota Kirloskar Motor (Bangalore, India). | rerank=0.0014 | fusion=0.1250
+
+
+
+
+###################### reranker is bad for this and fusion was good, how to decide which chunks to choose?.
+
+what to tweek.?

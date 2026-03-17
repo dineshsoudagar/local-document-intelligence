@@ -12,7 +12,7 @@ from src.config.index_config import IndexConfig
 from src.config.parser_config import ParserConfig
 from src.parser.docling_parser import DoclingParser
 from src.retrieval.qdrant_hybrid_index import QdrantHybridIndex
-
+import hashlib
 
 def print_results(results: list, preview_chars: int | None = None) -> None:
     """Print final retrieval results in a compact debug-friendly format."""
@@ -39,9 +39,11 @@ def print_results(results: list, preview_chars: int | None = None) -> None:
 
 
 def build_doc_id(path: str) -> str:
-    """Convert a file path into a stable document identifier."""
-    pdf_path = Path(path)
-    return pdf_path.stem.strip().replace(" ", "_").replace("-", "_").lower()
+    """Build a stable document identifier from filename and file bytes."""
+    pdf_path = Path(path).resolve()
+    digest = hashlib.sha1(pdf_path.read_bytes()).hexdigest()[:12]
+    stem = pdf_path.stem.strip().replace(" ", "_").replace("-", "_").lower()
+    return f"{stem}_{digest}"
 
 
 def main() -> None:

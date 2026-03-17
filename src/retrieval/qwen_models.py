@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from pathlib import Path
+
 """Local Qwen model wrappers for embedding, reranking, and grounded generation."""
 
 import re
@@ -14,10 +16,10 @@ class QwenDenseEmbedder:
     """Sentence-transformers wrapper for dense embedding generation."""
 
     def __init__(
-        self,
-        model_name: str,
-        batch_size: int = 8,
-        show_progress: bool = True,
+            self,
+            model_name: str,
+            batch_size: int = 8,
+            show_progress: bool = True,
     ) -> None:
         self._batch_size = batch_size
         self._show_progress = show_progress
@@ -67,10 +69,10 @@ class QwenReranker:
     """Causal-LM-based yes/no reranker for query-document relevance scoring."""
 
     def __init__(
-        self,
-        model_name: str,
-        batch_size: int = 4,
-        max_length: int = 4096,
+            self,
+            model_name: str,
+            batch_size: int = 4,
+            max_length: int = 4096,
     ) -> None:
         self._batch_size = batch_size
         self._max_length = max_length
@@ -110,10 +112,10 @@ class QwenReranker:
         self._suffix_tokens = self._encode_text(self._suffix)
 
     def score(
-        self,
-        query: str,
-        documents: Sequence[str],
-        instruction: str,
+            self,
+            query: str,
+            documents: Sequence[str],
+            instruction: str,
     ) -> list[float]:
         """Return yes-probability relevance scores for the supplied documents."""
         pairs = [
@@ -123,7 +125,7 @@ class QwenReranker:
         scores: list[float] = []
 
         for start in range(0, len(pairs), self._batch_size):
-            batch_pairs = pairs[start : start + self._batch_size]
+            batch_pairs = pairs[start: start + self._batch_size]
             batch_inputs = self._prepare_inputs(batch_pairs)
             scores.extend(self._compute_scores(batch_inputs))
 
@@ -153,7 +155,7 @@ class QwenReranker:
     def _prepare_inputs(self, pairs: Sequence[str]) -> dict[str, torch.Tensor]:
         """Tokenize, truncate body text, and batch inputs without tokenizer.pad."""
         max_body_length = (
-            self._max_length - len(self._prefix_tokens) - len(self._suffix_tokens)
+                self._max_length - len(self._prefix_tokens) - len(self._suffix_tokens)
         )
         encoded_pairs = self._tokenizer(
             list(pairs),
@@ -181,8 +183,8 @@ class QwenReranker:
 
         for row_index, sequence in enumerate(sequences):
             sequence_tensor = torch.tensor(sequence, dtype=torch.long)
-            input_ids[row_index, -len(sequence) :] = sequence_tensor
-            attention_mask[row_index, -len(sequence) :] = 1
+            input_ids[row_index, -len(sequence):] = sequence_tensor
+            attention_mask[row_index, -len(sequence):] = 1
 
         return {
             "input_ids": input_ids.to(self._device),
@@ -203,7 +205,7 @@ class QwenReranker:
 class LocalQwenGenerator:
     """Local wrapper for grounded text generation with Qwen instruct models."""
 
-    def __init__(self, model_name: str) -> None:
+    def __init__(self, model_name: str | Path) -> None:
         self._model_name = model_name
         self._device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
@@ -253,12 +255,12 @@ class LocalQwenGenerator:
         return self._tokenizer.decode(token_ids[:max_tokens], skip_special_tokens=True).strip()
 
     def build_prompt(
-        self,
-        *,
-        query: str,
-        context: str,
-        system_prompt: str,
-        answer_instruction: str,
+            self,
+            *,
+            query: str,
+            context: str,
+            system_prompt: str,
+            answer_instruction: str,
     ) -> str:
         """Build a chat prompt for grounded question answering."""
         messages = [
@@ -294,13 +296,13 @@ class LocalQwenGenerator:
         )
 
     def generate_from_prompt(
-        self,
-        prompt: str,
-        *,
-        max_new_tokens: int,
-        temperature: float,
-        top_p: float,
-        repetition_penalty: float,
+            self,
+            prompt: str,
+            *,
+            max_new_tokens: int,
+            temperature: float,
+            top_p: float,
+            repetition_penalty: float,
     ) -> str:
         """Generate a completion for a prepared prompt."""
         inputs = self._tokenizer(prompt, return_tensors="pt")
@@ -327,16 +329,16 @@ class LocalQwenGenerator:
         return self._strip_reasoning(answer)
 
     def generate_grounded_answer(
-        self,
-        *,
-        query: str,
-        context: str,
-        system_prompt: str,
-        answer_instruction: str,
-        max_new_tokens: int,
-        temperature: float,
-        top_p: float,
-        repetition_penalty: float,
+            self,
+            *,
+            query: str,
+            context: str,
+            system_prompt: str,
+            answer_instruction: str,
+            max_new_tokens: int,
+            temperature: float,
+            top_p: float,
+            repetition_penalty: float,
     ) -> str:
         """Generate a grounded answer from retrieved context."""
         prompt = self.build_prompt(
