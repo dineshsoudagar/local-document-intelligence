@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+"""Docling-based parser that extracts text and optional picture chunks."""
+
 import uuid
 from pathlib import Path
 from typing import Any
@@ -11,9 +13,14 @@ from src.parser.text_chunk import ParsedChunk
 
 
 class DoclingParser:
+    """Parse documents with Docling and return index-ready chunks."""
+
     def __init__(self, config: ParserConfig) -> None:
         config.validate()
         self._config = config
+
+        # The text converter is used for normal text extraction.
+        # The enriched converter can include picture-specific outputs.
         self._text_converter = config.build_text_converter()
         self._converter = config.build_converter()
         self._tokenizer = config.build_tokenizer()
@@ -27,11 +34,15 @@ class DoclingParser:
         source_path: str | Path,
         doc_id: str | None = None,
     ) -> list[ParsedChunk]:
+        """Parse one source file into text chunks and optional picture chunks."""
         path = Path(source_path)
         if not path.exists():
             raise FileNotFoundError(f"Source not found: {path}")
 
         resolved_doc_id = doc_id or f"doc_{uuid.uuid4().hex[:12]}"
+
+        # The enriched document is kept for picture traversal.
+        # The text-only document feeds the normal chunk extraction path.
         enriched_document = self._converter.convert(str(path)).document
         text_document = self._text_converter.convert(str(path)).document
 
@@ -59,6 +70,7 @@ class DoclingParser:
         doc_id: str,
         source_file: str,
     ) -> list[ParsedChunk]:
+        """Extract text chunks from the Docling document."""
         chunks: list[ParsedChunk] = []
 
         for chunk_index, chunk in enumerate(self._chunker.chunk(dl_doc=document)):
@@ -87,6 +99,7 @@ class DoclingParser:
         return chunks
 
     def _merge_small_text_chunks(self, chunks: list[ParsedChunk]) -> list[ParsedChunk]:
+        """Merge adjacent short text chunks when they fit together cleanly."""
         if not chunks:
             return []
 
@@ -153,6 +166,7 @@ class DoclingParser:
         source_file: str,
         start_index: int,
     ) -> list[ParsedChunk]:
+        """Extract picture-derived chunks from the enriched Docling document."""
         chunks: list[ParsedChunk] = []
         body_root = getattr(document, "body", None)
 
@@ -193,6 +207,7 @@ class DoclingParser:
         return chunks
 
     def _build_picture_text(self, document: Any, picture: Any) -> str:
+        """Build the text stored for a picture chunk."""
         annotation_texts = self._extract_annotation_texts(picture)
         caption = self._safe_caption_text(document, picture)
 
@@ -211,6 +226,7 @@ class DoclingParser:
 
     @staticmethod
     def _build_text_chunk_metadata(chunk: Any) -> dict[str, Any]:
+        """Extract metadata attached to a normal text chunk."""
         metadata: dict[str, Any] = {
             "parser": "docling",
             "block_type": "text",
@@ -230,6 +246,7 @@ class DoclingParser:
 
     @staticmethod
     def _safe_caption_text(document: Any, picture: Any) -> str:
+        """Return caption text if the picture exposes it safely."""
         caption_text = getattr(picture, "caption_text", None)
         if not callable(caption_text):
             return ""
@@ -239,6 +256,7 @@ class DoclingParser:
 
     @staticmethod
     def _extract_annotation_texts(picture: Any) -> list[str]:
+        """Extract normalized annotation texts from a picture item."""
         get_annotations = getattr(picture, "get_annotations", None)
         if not callable(get_annotations):
             return []
@@ -273,11 +291,13 @@ class DoclingParser:
 
     @staticmethod
     def _is_picture_item(item: Any) -> bool:
+        """Return whether the current Docling item is a picture."""
         label = str(getattr(item, "label", "") or "").strip().lower()
         return label == "picture" or item.__class__.__name__ == "PictureItem"
 
     @staticmethod
     def _extract_chunk_page_range(chunk: Any) -> tuple[int | None, int | None]:
+        """Extract the page span for a text chunk."""
         page_numbers: list[int] = []
 
         meta = getattr(chunk, "meta", None)
@@ -297,6 +317,7 @@ class DoclingParser:
 
     @staticmethod
     def _extract_item_page_range(item: Any) -> tuple[int | None, int | None]:
+        """Extract the page span for an arbitrary Docling item."""
         page_numbers: list[int] = []
         prov = getattr(item, "prov", None) or []
 
@@ -312,6 +333,7 @@ class DoclingParser:
 
     @staticmethod
     def _merge_page_start(left: int | None, right: int | None) -> int | None:
+        """Merge the earliest page start across two chunks."""
         if left is None:
             return right
         if right is None:
@@ -320,6 +342,7 @@ class DoclingParser:
 
     @staticmethod
     def _merge_page_end(left: int | None, right: int | None) -> int | None:
+        """Merge the latest page end across two chunks."""
         if left is None:
             return right
         if right is None:
@@ -328,6 +351,7 @@ class DoclingParser:
 
     @staticmethod
     def _reindex_chunks(chunks: list[ParsedChunk]) -> list[ParsedChunk]:
+        """Rewrite chunk indices after any merge or picture append operations."""
         reindexed: list[ParsedChunk] = []
 
         for index, chunk in enumerate(chunks):

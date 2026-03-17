@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+"""Parser configuration and Docling converter construction helpers."""
+
 from dataclasses import dataclass, field
 from typing import Any
 
@@ -15,21 +17,14 @@ from transformers import AutoTokenizer
 
 @dataclass(slots=True)
 class ParserConfig:
-    chunk_tokenizer_model: str = "Qwen/Qwen3-Embedding-0.6B"
-    max_chunk_tokens: int = 260
+    """Configuration for text parsing and optional picture extraction."""
+    max_chunk_tokens: int = 220
     min_chunk_tokens: int = 80
+    embedding_tokenizer_model: str = "sentence-transformers/all-MiniLM-L6-v2"
 
-    allowed_formats: list[InputFormat] = field(
-        default_factory=lambda: [
-            InputFormat.PDF,
-            InputFormat.DOCX,
-            InputFormat.MD,
-            InputFormat.HTML,
-            InputFormat.IMAGE,
-        ]
-    )
+    allowed_formats: list[InputFormat] | None = None
 
-    enable_picture_description: bool = True
+    enable_picture_description: bool = False
     include_picture_chunks: bool = True
     picture_description_model: str = "HuggingFaceTB/SmolVLM-256M-Instruct"
     picture_description_prompt: str = (
@@ -40,6 +35,7 @@ class ParserConfig:
     extra_format_options: dict[InputFormat, Any] = field(default_factory=dict)
 
     def validate(self) -> None:
+        """Fail fast on invalid parser settings."""
         if self.max_chunk_tokens <= 0:
             raise ValueError("max_chunk_tokens must be greater than 0")
         if self.min_chunk_tokens <= 0:
@@ -50,54 +46,34 @@ class ParserConfig:
             raise ValueError("picture_image_scale must be greater than 0")
 
     def build_tokenizer(self) -> HuggingFaceTokenizer:
-        tokenizer = AutoTokenizer.from_pretrained(self.chunk_tokenizer_model)
+        """Build the tokenizer used by the Docling chunker."""
+        tokenizer = AutoTokenizer.from_pretrained(self.embedding_tokenizer_model)
         return HuggingFaceTokenizer(
             tokenizer=tokenizer,
             max_tokens=self.max_chunk_tokens,
         )
 
     def build_converter(self) -> DocumentConverter:
+        """Build the full converter, optionally with picture description support."""
         format_options = dict(self.extra_format_options)
 
-        for input_format, format_option in self.build_format_options().items():
-            format_options[input_format] = format_option
+        pdf_option = self._build_pdf_format_option()
+        if pdf_option is not None:
+            format_options[InputFormat.PDF] = pdf_option
 
         return DocumentConverter(
             allowed_formats=self.allowed_formats,
             format_options=format_options or None,
         )
 
-    def build_format_options(self) -> dict[InputFormat, Any]:
-        options: dict[InputFormat, Any] = {}
-
-        pdf_option = self._build_pdf_format_option()
-        if pdf_option is not None and InputFormat.PDF in self.allowed_formats:
-            options[InputFormat.PDF] = pdf_option
-
-        docx_option = self._build_docx_format_option()
-        if docx_option is not None and InputFormat.DOCX in self.allowed_formats:
-            options[InputFormat.DOCX] = docx_option
-
-        markdown_option = self._build_markdown_format_option()
-        if markdown_option is not None and InputFormat.MD in self.allowed_formats:
-            options[InputFormat.MD] = markdown_option
-
-        html_option = self._build_html_format_option()
-        if html_option is not None and InputFormat.HTML in self.allowed_formats:
-            options[InputFormat.HTML] = html_option
-
-        image_option = self._build_image_format_option()
-        if image_option is not None and InputFormat.IMAGE in self.allowed_formats:
-            options[InputFormat.IMAGE] = image_option
-
-        return options
-
     def build_text_converter(self) -> DocumentConverter:
+        """Build a plain text-focused converter without extra picture options."""
         return DocumentConverter(
             allowed_formats=self.allowed_formats,
         )
 
     def _build_pdf_format_option(self) -> PdfFormatOption | None:
+        """Build the PDF pipeline option when picture description is enabled."""
         if not self.enable_picture_description:
             return None
 
@@ -112,15 +88,3 @@ class ParserConfig:
         )
 
         return PdfFormatOption(pipeline_options=pipeline_options)
-
-    def _build_docx_format_option(self) -> Any | None:
-        return None
-
-    def _build_markdown_format_option(self) -> Any | None:
-        return None
-
-    def _build_html_format_option(self) -> Any | None:
-        return None
-
-    def _build_image_format_option(self) -> Any | None:
-        return None

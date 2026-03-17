@@ -9,3 +9,4 @@ llama-index-embeddings-huggingface
 scikit-learn
 sentence-transformers
 threadpoolctl
+qdrant_client

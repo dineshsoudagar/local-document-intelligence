@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+"""Model wrappers for dense embeddings and reranking."""
+
 from typing import Sequence
 
 import torch
@@ -8,6 +10,8 @@ from transformers import AutoModelForCausalLM, AutoTokenizer
 
 
 class QwenDenseEmbedder:
+    """Wrap the embedding model used for dense retrieval."""
+
     def __init__(
         self,
         model_name: str,
@@ -31,9 +35,11 @@ class QwenDenseEmbedder:
 
     @property
     def dimension(self) -> int:
+        """Return embedding dimensionality for collection creation."""
         return int(self._model.get_sentence_embedding_dimension())
 
     def encode_documents(self, texts: Sequence[str]) -> list[list[float]]:
+        """Encode document texts for indexing."""
         embeddings = self._model.encode(
             list(texts),
             batch_size=self._batch_size,
@@ -44,6 +50,7 @@ class QwenDenseEmbedder:
         return embeddings.tolist()
 
     def encode_query(self, query: str) -> list[float]:
+        """Encode a query for dense retrieval."""
         embedding = self._model.encode(
             [query],
             batch_size=1,
@@ -56,6 +63,8 @@ class QwenDenseEmbedder:
 
 
 class QwenReranker:
+    """Wrap the reranker model used after hybrid candidate retrieval."""
+
     def __init__(
         self,
         model_name: str,
@@ -81,6 +90,7 @@ class QwenReranker:
         ).eval()
         self._model.to(self._device)
 
+        # Reranking is modeled as a yes/no decision on the next token.
         self._token_false_id = self._tokenizer.convert_tokens_to_ids("no")
         self._token_true_id = self._tokenizer.convert_tokens_to_ids("yes")
 
@@ -90,6 +100,7 @@ class QwenReranker:
             'only be "yes" or "no".<|im_end|>\n<|im_start|>user\n'
         )
         self._suffix = '<|im_end|>\n<|im_start|>assistant\n<think>\n\n</think>\n\n'
+
         self._prefix_tokens = self._tokenizer.encode(
             self._prefix,
             add_special_tokens=False,
@@ -105,6 +116,7 @@ class QwenReranker:
         documents: Sequence[str],
         instruction: str,
     ) -> list[float]:
+        """Score candidate documents against the user query."""
         pairs = [
             self._format_pair(instruction=instruction, query=query, document=text)
             for text in documents
@@ -120,6 +132,7 @@ class QwenReranker:
 
     @staticmethod
     def _format_pair(instruction: str, query: str, document: str) -> str:
+        """Format one query-document pair for the reranker prompt."""
         return (
             f"<Instruct>: {instruction}\n"
             f"<Query>: {query}\n"
@@ -127,9 +140,11 @@ class QwenReranker:
         )
 
     def _prepare_inputs(self, pairs: Sequence[str]) -> dict[str, torch.Tensor]:
+        """Tokenize, frame, and pad reranker inputs."""
         max_body_length = (
             self._max_length - len(self._prefix_tokens) - len(self._suffix_tokens)
         )
+
         inputs = self._tokenizer(
             list(pairs),
             padding=False,
@@ -148,14 +163,17 @@ class QwenReranker:
             padding=True,
             return_tensors="pt",
         )
-
         return {key: value.to(self._device) for key, value in padded.items()}
 
     @torch.inference_mode()
     def _compute_scores(self, inputs: dict[str, torch.Tensor]) -> list[float]:
+        """Return yes-probabilities for the prepared inputs."""
         logits = self._model(**inputs).logits[:, -1, :]
+
         true_logits = logits[:, self._token_true_id]
         false_logits = logits[:, self._token_false_id]
+
         yes_no_logits = torch.stack([false_logits, true_logits], dim=1)
         probabilities = torch.softmax(yes_no_logits, dim=1)[:, 1]
+
         return probabilities.float().cpu().tolist()

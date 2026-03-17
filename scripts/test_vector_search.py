@@ -1,8 +1,11 @@
 from __future__ import annotations
 
+"""CLI entrypoint for indexing a PDF and running hybrid search."""
+
 import argparse
 from pathlib import Path
 import time
+
 from docling.datamodel.base_models import InputFormat
 
 from src.config.index_config import IndexConfig
@@ -12,6 +15,7 @@ from src.retrieval.qdrant_hybrid_index import QdrantHybridIndex
 
 
 def print_results(results: list, preview_chars: int | None = None) -> None:
+    """Print final retrieval results in a compact debug-friendly format."""
     if not results:
         print("No results found.")
         return
@@ -35,11 +39,13 @@ def print_results(results: list, preview_chars: int | None = None) -> None:
 
 
 def build_doc_id(path: str) -> str:
+    """Convert a file path into a stable document identifier."""
     pdf_path = Path(path)
     return pdf_path.stem.strip().replace(" ", "_").replace("-", "_").lower()
 
 
 def main() -> None:
+    """Build the index if needed, then run normal or debug search."""
     cli = argparse.ArgumentParser()
     cli.add_argument("--pdf", required=True, help="Path to the PDF file")
     cli.add_argument("--query", required=True, help="Query text")
@@ -47,6 +53,7 @@ def main() -> None:
     cli.add_argument("--debug", action="store_true")
     args = cli.parse_args()
 
+    # Parser setup for PDF ingestion.
     parser_config = ParserConfig(
         allowed_formats=[InputFormat.PDF],
         enable_picture_description=False,
@@ -54,14 +61,17 @@ def main() -> None:
     )
     parser = DoclingParser(parser_config)
 
+    # Retrieval engine owns Qdrant, dense embeddings, and reranking.
     index = QdrantHybridIndex(IndexConfig())
 
+    # Only parse and build when requested or when no collection exists yet.
     if args.rebuild or not index.collection_exists():
         chunks = parser.parse(args.pdf, doc_id=build_doc_id(args.pdf))
         index.build(chunks=chunks, rebuild=args.rebuild)
 
     search_start = time.perf_counter()
 
+    # Debug mode exposes dense, sparse, fused, and reranked stages separately.
     if args.debug:
         debug = index.debug_search(args.query)
 
