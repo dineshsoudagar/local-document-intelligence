@@ -4,7 +4,7 @@ import argparse
 from pathlib import Path
 
 from src.config.parser_config import ParserConfig
-from src.utils.io import write_json
+from src.utils.io import write_json, resolve_pdf_path
 from src.parser.docling_parser import DoclingParser
 from docling.datamodel.base_models import InputFormat
 
@@ -23,7 +23,7 @@ def inspect_chunks(chunks: list, limit: int = 5, preview_chars: int = 700) -> No
 
 def main() -> None:
     cli = argparse.ArgumentParser()
-    cli.add_argument("--pdf", required=True, help="Path to the PDF file")
+    cli.add_argument("--file", required=True, help="Path to the PDF file")
     cli.add_argument("--chunk-size", type=int, default=200)
     cli.add_argument("--inspect-limit", type=int, default=5)
     cli.add_argument("--output-json", default=None)
@@ -34,16 +34,13 @@ def main() -> None:
         min_chunk_tokens=150,
         allowed_formats=[
             InputFormat.PDF,
-            InputFormat.DOCX,
-            InputFormat.MD,
-            InputFormat.IMAGE,
         ],
         enable_picture_description=True,
         include_picture_chunks=True
     )
 
     parser = DoclingParser(config)
-    chunks = parser.parse(args.pdf)
+    chunks = parser.parse(resolve_pdf_path(args.file))
 
     if not args.output_json:
         print(f"total_chunks: {len(chunks)}")

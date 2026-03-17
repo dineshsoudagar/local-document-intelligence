@@ -38,10 +38,10 @@ class ParserConfig:
     allowed_formats: list[InputFormat] = field(
         default_factory=lambda: [
             InputFormat.PDF,
-            InputFormat.DOCX,
-            InputFormat.MD,
-            InputFormat.HTML,
-            InputFormat.IMAGE,
+            #InputFormat.DOCX,
+            #InputFormat.MD,
+            #InputFormat.HTML,
+            #InputFormat.IMAGE,
         ]
     )
 

@@ -1,5 +1,9 @@
 from __future__ import annotations
 
+from pathlib import Path
+
+from src.utils.io import resolve_pdf_path
+
 """CLI entrypoint for grounded answer generation over the local corpus."""
 
 import argparse
@@ -18,9 +22,9 @@ def parse_args() -> argparse.Namespace:
     )
     cli.add_argument("--query", required=True, help="Question to answer")
     cli.add_argument(
-        "--pdf",
+        "--file",
         default=None,
-        help="Optional PDF to auto-ingest before answering.",
+        help="Optional PDF file to auto-ingest before answering.",
     )
     cli.add_argument(
         "--json",
@@ -41,12 +45,12 @@ def main() -> None:
 
     index_service = IndexService()
 
-    if args.pdf:
-        index_service.ensure_pdf_indexed(args.pdf)
+    if args.file:
+        index_service.ensure_pdf_indexed(resolve_pdf_path(args.file))
 
     if not index_service.index.collection_exists():
         raise ValueError(
-            "No index exists yet. Provide --pdf to ingest a document first."
+            "No index exists yet. Provide --file to ingest a document first."
         )
 
     service = GroundedAnswerService(

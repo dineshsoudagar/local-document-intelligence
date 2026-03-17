@@ -9,6 +9,7 @@ from src.config.index_config import IndexConfig
 from src.config.parser_config import ParserConfig
 from src.parser.docling_parser import DoclingParser
 from src.retrieval.qdrant_hybrid_index import QdrantHybridIndex
+from src.utils.io import resolve_pdf_path
 
 
 class IndexService:
@@ -53,35 +54,13 @@ class IndexService:
 
     def reindex_pdf(self, pdf_path: str | Path) -> str:
         """Replace one indexed PDF with a freshly parsed version."""
-        path = Path(pdf_path).resolve()
+        path = resolve_pdf_path(pdf_path)
         doc_id = self.build_doc_id(path)
 
         self._index.delete_document(doc_id)
         chunks = self._parser.parse(path, doc_id=doc_id)
         self._index.build(chunks=chunks, rebuild=False)
         return doc_id
-
-    def ingest_folder(self, folder_path: str | Path) -> list[str]:
-        """Index all PDFs inside a folder if they are missing."""
-        folder = Path(folder_path).resolve()
-        if not folder.exists() or not folder.is_dir():
-            raise FileNotFoundError(f"Folder not found: {folder}")
-
-        doc_ids: list[str] = []
-        for pdf_path in sorted(folder.rglob("*.pdf")):
-            doc_ids.append(self.ensure_pdf_indexed(pdf_path))
-        return doc_ids
-
-    def reindex_folder(self, folder_path: str | Path) -> list[str]:
-        """Reindex all PDFs inside a folder."""
-        folder = Path(folder_path).resolve()
-        if not folder.exists() or not folder.is_dir():
-            raise FileNotFoundError(f"Folder not found: {folder}")
-
-        doc_ids: list[str] = []
-        for pdf_path in sorted(folder.rglob("*.pdf")):
-            doc_ids.append(self.reindex_pdf(pdf_path))
-        return doc_ids
 
     def clear(self) -> None:
         """Clear the entire index."""
@@ -90,7 +69,7 @@ class IndexService:
     @staticmethod
     def build_doc_id(pdf_path: str | Path) -> str:
         """Build a stable document id from file content."""
-        path = Path(pdf_path).resolve()
+        path = resolve_pdf_path(pdf_path)
         digest = hashlib.sha1(path.read_bytes()).hexdigest()[:12]
         stem = path.stem.strip().replace(" ", "_").replace("-", "_").lower()
         return f"{stem}_{digest}"
