@@ -8,7 +8,7 @@ from src.utils.io import resolve_pdf_path
 
 import argparse
 import json
-
+import time
 from src.config.generator_config import GeneratorConfig
 from src.generation.answer_service import GroundedAnswerService
 from src.generation.context_builder import render_sources
@@ -36,6 +36,19 @@ def parse_args() -> argparse.Namespace:
         action="store_true",
         help="Print grounded context before the final answer.",
     )
+
+    cli.add_argument(
+        "--mode",
+        choices=["grounded", "chat", "auto"],
+        default="grounded",
+        help="Answer mode. 'grounded' always uses retrieval, 'chat' never uses retrieval, 'auto' switches by rerank "
+             "confidence.",
+    )
+    cli.add_argument(
+        "--stream",
+        action="store_true",
+        help="Stream generated text to stdout.",
+    )
     return cli.parse_args()
 
 
@@ -48,15 +61,50 @@ def main() -> None:
     if args.file:
         index_service.ensure_pdf_indexed(resolve_pdf_path(args.file))
 
-    if not index_service.index.collection_exists():
+    if args.mode == "grounded" and not index_service.index.collection_exists():
         raise ValueError(
-            "No index exists yet. Provide --file to ingest a document first."
+            "No index exists yet. Provide --file to ingest a document first, or use --mode chat."
         )
 
     service = GroundedAnswerService(
         index=index_service.index,
         config=GeneratorConfig(),
     )
+
+
+    if args.json and args.stream:
+        raise ValueError("--json and --stream cannot be used together.")
+
+    if args.stream:
+        context, _, retrieval_seconds, stream = service.stream_answer(args.query)
+
+        if args.show_context and context:
+            print("#" * 40 + " CONTEXT " + "#" * 40)
+            print(context)
+            print()
+
+        print("#" * 40 + " ANSWER " + "#" * 40)
+
+        generation_started_at = time.perf_counter()
+        for chunk in stream:
+            print(chunk, end="", flush=True)
+        generation_seconds = time.perf_counter() - generation_started_at
+
+        print()
+        print()
+
+        if context.sources:
+            print(render_sources(context.sources))
+            print()
+
+        print(
+            "timings: "
+            f"retrieval={retrieval_seconds:.3f}s, "
+            f"generation={generation_seconds:.3f}s, "
+            f"pipeline={retrieval_seconds + generation_seconds:.3f}s"
+        )
+        return
+
     result = service.answer(args.query)
 
     payload = result.to_dict(include_context=args.show_context)

@@ -5,11 +5,12 @@ from pathlib import Path
 """Local Qwen model wrappers for embedding, reranking, and grounded generation."""
 
 import re
-from typing import Any, Sequence
+from typing import Any, Iterator, Sequence
 
 import torch
+from threading import Thread
 from sentence_transformers import SentenceTransformer
-from transformers import AutoModelForCausalLM, AutoTokenizer
+from transformers import AutoModelForCausalLM, AutoTokenizer, TextIteratorStreamer
 
 
 class QwenDenseEmbedder:
@@ -91,7 +92,7 @@ class QwenReranker:
             "trust_remote_code": True,
         }
         if self._device.type == "cuda":
-            model_kwargs["torch_dtype"] = torch.float16
+            model_kwargs["dtype"] = torch.float16
 
         self._model = AutoModelForCausalLM.from_pretrained(
             model_name,
@@ -223,10 +224,10 @@ class LocalQwenGenerator:
             "trust_remote_code": True,
         }
         if self._device.type == "cuda":
-            model_kwargs["torch_dtype"] = torch.float16
+            model_kwargs["dtype"] = torch.float16
             model_kwargs["device_map"] = "auto"
         else:
-            model_kwargs["torch_dtype"] = torch.float32
+            model_kwargs["dtype"] = torch.float32
 
         self._model = AutoModelForCausalLM.from_pretrained(
             self._model_name,
@@ -258,11 +259,23 @@ class LocalQwenGenerator:
             self,
             *,
             query: str,
-            context: str,
             system_prompt: str,
             answer_instruction: str,
+            context: str | None = None,
     ) -> str:
-        """Build a chat prompt for grounded question answering."""
+        """Build a chat prompt for grounded or direct answering."""
+        if context:
+            user_content = (
+                f"Question:\n{query}\n\n"
+                f"Retrieved context:\n{context}\n\n"
+                f"{answer_instruction}"
+            )
+        else:
+            user_content = (
+                f"Request:\n{query}\n\n"
+                f"{answer_instruction}"
+            )
+
         messages = [
             {
                 "role": "system",
@@ -270,11 +283,7 @@ class LocalQwenGenerator:
             },
             {
                 "role": "user",
-                "content": (
-                    f"Question:\n{query}\n\n"
-                    f"Retrieved context:\n{context}\n\n"
-                    f"{answer_instruction}"
-                ),
+                "content": user_content,
             },
         ]
 
@@ -289,9 +298,7 @@ class LocalQwenGenerator:
             "System:\n"
             f"{system_prompt}\n\n"
             "User:\n"
-            f"Question:\n{query}\n\n"
-            f"Retrieved context:\n{context}\n\n"
-            f"{answer_instruction}\n\n"
+            f"{user_content}\n\n"
             "Assistant:\n"
         )
 
@@ -328,24 +335,134 @@ class LocalQwenGenerator:
         answer = self._tokenizer.decode(generated_ids, skip_special_tokens=True).strip()
         return self._strip_reasoning(answer)
 
-    def generate_grounded_answer(
+    def stream_from_prompt(
+            self,
+            prompt: str,
+            *,
+            max_new_tokens: int,
+            temperature: float,
+            top_p: float,
+            repetition_penalty: float,
+    ) -> Iterator[str]:
+        """Yield generated text chunks for a prepared prompt."""
+        inputs = self._tokenizer(prompt, return_tensors="pt")
+        inputs = {key: value.to(self._model.device) for key, value in inputs.items()}
+
+        do_sample = temperature > 0
+        streamer = TextIteratorStreamer(
+            self._tokenizer,
+            skip_prompt=True,
+            skip_special_tokens=True,
+            timeout=60.0,
+        )
+
+        generate_kwargs: dict[str, Any] = {
+            **inputs,
+            "max_new_tokens": max_new_tokens,
+            "do_sample": do_sample,
+            "repetition_penalty": repetition_penalty,
+            "pad_token_id": self._tokenizer.pad_token_id,
+            "eos_token_id": self._tokenizer.eos_token_id,
+            "streamer": streamer,
+        }
+        if do_sample:
+            generate_kwargs["temperature"] = temperature
+            generate_kwargs["top_p"] = top_p
+
+        def _run_generation() -> None:
+            with torch.inference_mode():
+                self._model.generate(**generate_kwargs)
+
+        worker = Thread(target=_run_generation)
+        worker.start()
+
+        for chunk in streamer:
+            if chunk:
+                yield chunk
+
+        worker.join()
+
+    def generate_answer(
             self,
             *,
             query: str,
-            context: str,
             system_prompt: str,
             answer_instruction: str,
             max_new_tokens: int,
             temperature: float,
             top_p: float,
             repetition_penalty: float,
+            context: str | None = None,
     ) -> str:
-        """Generate a grounded answer from retrieved context."""
+        """Generate an answer with or without retrieved context."""
         prompt = self.build_prompt(
             query=query,
             context=context,
             system_prompt=system_prompt,
             answer_instruction=answer_instruction,
+        )
+        return self.generate_from_prompt(
+            prompt,
+            max_new_tokens=max_new_tokens,
+            temperature=temperature,
+            top_p=top_p,
+            repetition_penalty=repetition_penalty,
+        )
+
+    def build_chat_prompt(
+            self,
+            *,
+            query: str,
+            system_prompt: str,
+            chat_instruction: str,
+    ) -> str:
+        """Build a normal chat prompt without retrieved context."""
+        messages = [
+            {
+                "role": "system",
+                "content": system_prompt,
+            },
+            {
+                "role": "user",
+                "content": (
+                    f"Request:\n{query}\n\n"
+                    f"{chat_instruction}"
+                ),
+            },
+        ]
+
+        if hasattr(self._tokenizer, "apply_chat_template"):
+            return self._tokenizer.apply_chat_template(
+                messages,
+                tokenize=False,
+                add_generation_prompt=True,
+            )
+
+        return (
+            "System:\n"
+            f"{system_prompt}\n\n"
+            "User:\n"
+            f"Request:\n{query}\n\n"
+            f"{chat_instruction}\n\n"
+            "Assistant:\n"
+        )
+
+    def generate_chat_answer(
+            self,
+            *,
+            query: str,
+            system_prompt: str,
+            chat_instruction: str,
+            max_new_tokens: int,
+            temperature: float,
+            top_p: float,
+            repetition_penalty: float,
+    ) -> str:
+        """Generate a direct answer without retrieval context."""
+        prompt = self.build_chat_prompt(
+            query=query,
+            system_prompt=system_prompt,
+            chat_instruction=chat_instruction,
         )
         return self.generate_from_prompt(
             prompt,

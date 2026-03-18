@@ -1,0 +1,303 @@
+Retrieval and Ranking Learnings
+===============================
+
+Context
+-------
+I was debugging a local RAG retrieval pipeline for factual document QA.
+The concrete failure case was a query like:
+"who is dinesh and where does he work currently?"
+
+The system retrieved relevant chunks, but the final answer was unstable or wrong depending on the selected top chunks.
+
+What I Observed
+---------------
+1. Hybrid fusion was often finding the correct evidence region.
+2. The reranker was not always reliable enough to be the final decision-maker.
+3. The final chunk selection policy was too dependent on rerank score.
+4. Multi-part factual questions need evidence coverage, not just one high-scoring chunk.
+5. Weak typing and optional score handling were making the code harder to reason about.
+
+Core Problem I Identified
+-------------------------
+The pipeline was effectively doing this:
+
+dense retrieval + sparse retrieval
+-> fusion
+-> rerank
+-> final ranking mostly by rerank
+
+This was risky because:
+- fusion was good at recall
+- reranker was sometimes noisy
+- final ranking let reranker override fusion too aggressively
+
+That caused failures where:
+- a chunk describing the person was selected
+- but the chunk containing the current employer was not preserved strongly enough
+
+What I Changed
+--------------
+1. I stopped treating rerank score as the only final signal.
+2. I introduced blended ranking using both fusion and rerank.
+3. I normalized both score types before combining them.
+4. I cleaned the type boundary so final returned chunks always have valid scores.
+5. I explored moving from fixed blend weights to dynamic blend weights.
+
+Key Idea 1: Fusion and Rerank Have Different Jobs
+-------------------------------------------------
+Fusion is useful for:
+- stable recall
+- combining dense and sparse retrieval
+- surfacing the right candidate region
+
+Rerank is useful for:
+- refining precision
+- pushing directly relevant chunks higher
+- resolving ambiguity among candidates
+
+Important learning:
+reranker should refine retrieval, not blindly dominate it.
+
+Key Idea 2: Use Blended Ranking Instead of Rerank-Only Sorting
+--------------------------------------------------------------
+I changed the ranking logic from:
+
+final sort by rerank score
+
+to:
+
+final_score = fusion_weight * normalized_fusion
+            + rerank_weight * normalized_rerank
+
+This solved an important design problem:
+- fusion still contributes to the final decision
+- reranker still helps
+- one noisy component cannot completely hijack the result
+
+Why Normalization Was Needed
+----------------------------
+Fusion scores and rerank scores live on different numeric ranges.
+Raw combination is not meaningful.
+
+I used min-max normalization:
+normalized_value = (value - min) / (max - min)
+
+This maps all scores into [0, 1] for that query.
+
+What I Learned:
+- normalization does not improve ranking by itself
+- it only makes different score types comparable before blending
+
+Key Idea 3: Fix Invariants at the Correct Boundary
+--------------------------------------------------
+Originally, score fields were optional in the returned result objects.
+That forced unnecessary defensive code.
+
+I cleaned this by making final returned chunks always contain:
+- fused_score
+- rerank_score
+- final_score
+
+What I Learned:
+- optional fields should exist only when uncertainty is real
+- if search() always computes scores, result objects should not pretend scores may be missing
+- weak typing leads to noisy code and harder debugging
+
+Key Idea 4: Fixed Weights Are a Baseline, Not a Final Policy
+------------------------------------------------------------
+I first used a fixed blend:
+- fusion_weight = 0.65
+- rerank_weight = 0.35
+
+Why this helped:
+- easy to reason about
+- easy to debug
+- reproducible behavior
+
+But I also realized fixed weights are not universally optimal.
+
+Key Idea 5: Dynamic Weighting Can Be Better, but Only If It Uses Real Signals
+------------------------------------------------------------------------------
+I explored dynamic blend weighting based on reranker score separation.
+
+The idea:
+- if reranker clearly distinguishes the best chunk, trust reranker more
+- if reranker scores are flat, trust fusion more
+
+I used two signals:
+
+1. top_gap
+   top_gap = top1 - top2
+
+   Meaning:
+   how much the best reranked chunk beats the second-best chunk
+
+2. top_vs_mean
+   top_vs_mean = top1 - mean(top_n_scores)
+
+   Meaning:
+   how much the best reranked chunk stands above the top candidate pool
+
+What I Learned:
+- max score minus min score is too crude
+- top-of-list separation is more useful than full-list spread
+- the question is not whether reranker has a wide range
+- the question is whether reranker is confidently distinguishing the top result
+
+Dynamic Weighting Logic
+-----------------------
+Three confidence zones were used:
+
+1. Strong reranker confidence
+   if top_gap is large AND top_vs_mean is large
+   -> trust reranker more
+
+2. Medium reranker confidence
+   if top_gap is moderate OR top_vs_mean is moderate
+   -> use balanced blending
+
+3. Weak reranker confidence
+   if both are small
+   -> trust fusion more
+
+Example policy:
+- strong -> (fusion=0.45, rerank=0.55)
+- medium -> (fusion=0.60, rerank=0.40)
+- weak -> (fusion=0.75, rerank=0.25)
+
+What Problem This Solved
+------------------------
+It made ranking more adaptive:
+- precise reranker when reranker looks confident
+- safer fusion-heavy ranking when reranker looks indecisive
+
+That is much better than keeping reranker power fixed for every query.
+
+Important Practical Learning
+----------------------------
+Dynamic logic must stay inspectable.
+If weights change per query, debug output must show:
+- chosen fusion_weight
+- chosen rerank_weight
+- top_gap
+- top_vs_mean
+- normalized scores
+- final blended score
+
+Otherwise dynamic ranking becomes hidden behavior and debugging becomes much harder.
+
+What I Actually Solved
+----------------------
+1. I identified that rerank-only final sorting was too brittle.
+2. I replaced it with blended ranking.
+3. I normalized score signals before combining them.
+4. I cleaned score typing and result invariants.
+5. I designed a more meaningful dynamic weighting strategy based on reranker separation.
+6. I improved the conceptual understanding of retrieval:
+   the real goal is evidence set construction, not just top-k sorting.
+
+What I Did Not Fully Solve Yet
+------------------------------
+1. Diversity-aware final selection
+   top-k can still contain near-duplicate chunks
+
+2. Chunking quality
+   if employer and role details are split badly, ranking alone cannot fix that
+
+3. Evidence coverage for multi-part questions
+   a query like
+   "who is he and where does he work"
+   may require multiple complementary chunks
+
+4. Generator behavior
+   even good retrieval can still produce weak answers if generation is careless
+
+Main Engineering Lessons
+------------------------
+1. Retrieval quality is not only about finding relevant chunks.
+   It is also about preserving the right evidence into final context.
+
+2. Rerankers are useful, but they are not automatically trustworthy enough to dominate final selection.
+
+3. Fusion is often more robust than expected.
+   It should not be treated as a disposable intermediate stage.
+
+4. Score blending needs normalization.
+
+5. Code should enforce invariants once, at the right boundary, instead of spreading defensive checks everywhere.
+
+6. Dynamic policies are only useful when based on interpretable signals.
+
+7. Debugging retrieval requires stage-wise inspection:
+   dense
+   sparse
+   fused
+   reranked
+   final selected chunks
+
+How I Would Explain This in One Line
+------------------------------------
+I improved the retriever from a rerank-dominated top-k selector into a more stable evidence-ranking system that combines fusion robustness with reranker precision.
+
+Short Interview Questions and Answers
+=====================================
+
+1. Why was rerank-only final sorting a problem?
+Answer:
+Because it allowed one noisy reranker score to override strong fused retrieval evidence. That caused unstable chunk selection for factual multi-part questions.
+
+2. Why use blended ranking?
+Answer:
+Blended ranking combines fusion recall stability with reranker precision. It reduces the risk of over-trusting either component.
+
+3. Why normalize fusion and rerank scores before blending?
+Answer:
+Because the two score types live on different numeric ranges. Without normalization, one signal may dominate only due to scale.
+
+4. What does min-max normalization do?
+Answer:
+It maps scores into [0, 1] so the minimum becomes 0 and the maximum becomes 1, preserving relative ordering within that query.
+
+5. What is top_gap?
+Answer:
+top_gap is the difference between the top rerank score and the second-highest rerank score. It measures how clearly the best chunk beats the next-best chunk.
+
+6. What is top_vs_mean?
+Answer:
+top_vs_mean is the difference between the best rerank score and the average of the top N rerank scores. It measures how much the best chunk stands above the top candidate pool.
+
+7. Why is top_gap alone not enough?
+Answer:
+Because the top chunk may beat rank 2 slightly while the top few chunks are still very close overall. top_vs_mean adds another view of separation.
+
+8. Why prefer top-of-list statistics over full score span?
+Answer:
+Because full span can be distorted by weak low-ranked candidates. What matters most is whether the top candidate is meaningfully separated from the top competition.
+
+9. Why keep fixed weights at first?
+Answer:
+Fixed weights are easier to debug and compare. They provide a stable baseline before adding dynamic logic.
+
+10. When should dynamic weighting be used?
+Answer:
+When it is based on meaningful signals such as reranker separation or retrieval agreement, not arbitrary heuristics.
+
+11. What was the typing improvement in the retrieval results?
+Answer:
+I made final returned chunks always contain valid fused_score, rerank_score, and final_score instead of allowing optional score fields.
+
+12. What is the bigger retrieval lesson here?
+Answer:
+Retrieval is not just about ranking one best chunk. It is about constructing a reliable evidence set for answer generation.
+
+13. What is still missing after blended ranking?
+Answer:
+Diversity-aware selection, better chunking, multi-chunk evidence coverage, and more robust answer generation.
+
+14. How would you validate whether the new ranking policy is better?
+Answer:
+Run a labeled query set, inspect whether the correct chunk survives each stage, and compare final answer quality and evidence coverage across configurations.
+
+15. What is the practical takeaway from this work?
+Answer:
+A retrieval pipeline becomes more trustworthy when ranking is explicit, typed cleanly, normalized properly, and debugged stage by stage.

@@ -27,8 +27,8 @@ class GeneratorConfig:
     max_chunk_tokens: int = 900
     max_new_tokens: int = 384
 
-    temperature: float = 0.0
-    top_p: float = 0.9
+    temperature: float = 0.7
+    top_p: float = 0.8
     repetition_penalty: float = 1.05
 
     system_prompt: str = (
@@ -40,6 +40,18 @@ class GeneratorConfig:
         "Return only the final answer."
     )
     answer_instruction: str = "Write a concise answer grounded in the retrieved context."
+
+    assistant_system_prompt: str = (
+        "You are a helpful local assistant. "
+        "Answer clearly and directly. "
+        "Be honest about uncertainty. "
+        "Do not output chain-of-thought or <think> tags. "
+        "Return only the final answer."
+    )
+    assistant_instruction: str = "Answer the user's request directly."
+
+    auto_min_top_rerank_score: float = 0.28
+    auto_min_second_rerank_score: float = 0.18
 
     def __post_init__(self) -> None:
         """Normalize the project root once during initialization."""
@@ -65,7 +77,15 @@ class GeneratorConfig:
             raise ValueError("top_p must be in the range (0, 1]")
         if self.repetition_penalty <= 0:
             raise ValueError("repetition_penalty must be greater than 0")
-
+        if not 0.0 <= self.auto_min_top_rerank_score <= 1.0:
+            raise ValueError("auto_min_top_rerank_score must be in the range [0, 1]")
+        if not 0.0 <= self.auto_min_second_rerank_score <= 1.0:
+            raise ValueError("auto_min_second_rerank_score must be in the range [0, 1]")
+        if self.auto_min_second_rerank_score > self.auto_min_top_rerank_score:
+            raise ValueError(
+                "auto_min_second_rerank_score must be smaller than or equal to "
+                "auto_min_top_rerank_score"
+            )
         if self.max_chunk_tokens > self.max_context_tokens:
             raise ValueError("max_chunk_tokens must be smaller than or equal to max_context_tokens")
 
