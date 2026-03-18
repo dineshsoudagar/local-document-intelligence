@@ -1,0 +1,70 @@
+# Chat Learnings Note
+
+## What I changed
+- Kept the system grounded-first instead of turning it into a freestyle chatbot by default.
+- Introduced the idea of three user-facing modes: `grounded`, `chat`, and `auto`.
+- Treated `auto` as a routing policy, not a third generation style.
+- Moved routing logic to the service layer instead of burying it inside retrieval or model code.
+- Refactored prompt building so one generator can support both grounded answers and direct chat by changing prompt content.
+- Added streaming support at the generator layer using iterator-based token streaming.
+- Added CLI support for `--stream` and `--mode`.
+
+## Core concepts I learned
+- Retrieval ranking score and answerability are not the same thing.
+- `final_score` is useful for ranking candidates, but it is a weak signal for deciding whether retrieval should be trusted.
+- Absolute reranker confidence is a better routing signal than normalized blended score.
+- `auto` should retrieve first, then decide whether to continue grounded or fall back to chat.
+- Prompt construction is the real behavioral control point for the generator.
+- Streaming belongs in the generation layer, not in retrieval.
+- Retrieval and context building still happen before streaming starts, so streaming improves perceived latency, not retrieval latency.
+- For Qwen3-4B-Instruct-2507, `<think>` filtering is unnecessary because the model is non-thinking.
+
+## Architecture decisions worth remembering
+- Service layer owns orchestration: retrieve, build context, choose mode, generate.
+- Retriever should stay focused on search and reranking, not application behavior.
+- Generator should expose reusable primitives: build prompt, generate full answer, stream answer.
+- CLI should expose control, not contain core retrieval logic.
+
+## Good decisions
+- Default mode should stay `grounded`, not `auto`.
+- Generic assistant prompt should stay generic, not code-biased.
+- One prompt builder is cleaner than separate grounded/chat generator functions if behavior differs only by prompt structure.
+- Streaming was added without breaking the existing blocking path.
+
+## Important caveats in current code
+- `answer_query.py` defines `--mode`, but the non-streaming path still calls `service.answer(args.query)` without passing `mode`.
+- `stream_answer()` currently streams only grounded generation and ignores mode routing.
+- `answer_service.py` references `chat_system_prompt` and `chat_instruction`, but `generator_config.py` currently defines `assistant_system_prompt` and `assistant_instruction`.
+- `qwen_models.py` still contains extra chat-specific helper functions even after the simpler unified prompt approach was preferred.
+
+## Practical takeaway
+- First build explicit control.
+- Then add auto-routing.
+- Then calibrate thresholds with real queries.
+- Do not confuse a partially wired feature with a finished feature.
+
+## Interview-style Q&A
+
+**Q: Why is `auto` not a third generation mode?**  
+A: Because `auto` does not define how the model speaks. It only decides whether the request should use grounded generation or direct chat.
+
+**Q: Why is `final_score` a weak routing signal?**  
+A: Because it is built for ranking within a candidate pool and can look strong even when the whole pool is weak.
+
+**Q: Why place routing in the service layer?**  
+A: Because the service already owns retrieval, context building, and generation orchestration. That is the correct abstraction boundary.
+
+**Q: Why keep `grounded` as the default mode?**  
+A: Because the product promise is source-grounded document intelligence, and uncalibrated auto fallback can silently hallucinate.
+
+**Q: What problem does streaming actually solve?**  
+A: It improves perceived answer latency after generation starts. It does not make retrieval faster.
+
+**Q: Why was `<think>` filtering not prioritized?**  
+A: Because the chosen generator model is non-thinking, so adding think-tag filtering would solve the wrong problem.
+
+**Q: What is the cleanest generator design you arrived at?**  
+A: One reusable prompt builder and one generation path, with behavior controlled by prompt inputs rather than duplicated generator functions.
+
+**Q: What is still unfinished?**  
+A: Mode wiring in the CLI, mode-aware streaming, and cleanup of naming inconsistencies between config and service.
