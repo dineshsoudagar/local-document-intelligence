@@ -23,7 +23,6 @@ class GeneratorConfig:
     generator_model_key: str = "generator"
     generator_model_path_override: str | Path | None = None
 
-    retrieval_top_k: int = 10
     max_context_tokens: int = 6000
     max_chunk_tokens: int = 900
     max_new_tokens: int = 384
@@ -56,8 +55,6 @@ class GeneratorConfig:
 
     def validate(self) -> None:
         """Validate generation settings and fail early on broken local paths."""
-        if self.retrieval_top_k <= 0:
-            raise ValueError("retrieval_top_k must be greater than 0")
         if self.max_context_tokens <= 0:
             raise ValueError("max_context_tokens must be greater than 0")
         if self.max_chunk_tokens <= 0:

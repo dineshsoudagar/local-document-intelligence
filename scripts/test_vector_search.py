@@ -78,18 +78,26 @@ def main() -> None:
     if args.debug:
         debug = index.debug_search(args.query)
 
+        if "blend" in debug:
+            print("\n" + "#" * 30 + " BLEND " + "#" * 30)
+            print(f"fusion_weight : {debug['blend']['fusion_weight']:.2f}")
+            print(f"rerank_weight : {debug['blend']['rerank_weight']:.2f}")
+
         for stage_name in ["dense", "sparse", "fused", "reranked"]:
             print(f"\n{'#' * 30} {stage_name.upper()} {'#' * 30}")
             for rank, item in enumerate(debug[stage_name][:10], start=1):
                 print("-" * 100)
-                print(f"rank    : {rank}")
-                print(f"chunk_id : {item['chunk_id']}")
-                print(f"score    : {item.get('score', item.get('fusion_score'))}")
+                print(f"rank      : {rank}")
+                print(f"chunk_id  : {item['chunk_id']}")
+                print(f"score     : {item.get('score', item.get('fusion_score'))}")
                 if "rerank_score" in item:
-                    print(f"rerank   : {item['rerank_score']}")
-                    print(f"fusion   : {item['fusion_score']}")
-                print(f"pages    : {item['pages']}")
-                print(f"headings : {item['headings']}")
+                    print(f"rerank    : {item['rerank_score']}")
+                    print(f"fusion    : {item['fusion_score']}")
+                    print(f"f_norm    : {item['fusion_norm']}")
+                    print(f"r_norm    : {item['rerank_norm']}")
+                    print(f"final     : {item['final_score']}")
+                print(f"pages     : {item['pages']}")
+                print(f"headings  : {item['headings']}")
                 print("preview:")
                 print(item["preview"])
 

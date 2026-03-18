@@ -79,7 +79,7 @@ class GroundedAnswerService:
     def retrieve(self, query: str) -> tuple[list[RetrievedChunk], float]:
         """Run retrieval for the supplied query."""
         started_at = time.perf_counter()
-        chunks = self._index.search(query, top_k=self._config.retrieval_top_k)
+        chunks = self._index.search(query)
         elapsed = time.perf_counter() - started_at
         return chunks, elapsed
 
@@ -147,36 +147,6 @@ class GroundedAnswerService:
             answer=answer,
             context=grounded_context,
             retrieved_chunk_count=len(retrieved_chunks),
-            timings=timings,
-        )
-
-    def answer_from_chunks(
-            self,
-            *,
-            query: str,
-            chunks: Sequence[RetrievedChunk],
-    ) -> GroundedAnswerResult:
-        """Generate a grounded answer from pre-retrieved chunks."""
-        overall_started_at = time.perf_counter()
-        grounded_context = self.build_context(chunks)
-        if not grounded_context.text:
-            raise RuntimeError(
-                "Provided chunks did not produce any prompt context within the token budget"
-            )
-        answer, generation_seconds = self.generate_answer(
-            query=query,
-            context_text=grounded_context.text,
-        )
-        timings = AnswerTimings(
-            retrieval_seconds=0.0,
-            generation_seconds=generation_seconds,
-            total_seconds=time.perf_counter() - overall_started_at,
-        )
-        return GroundedAnswerResult(
-            query=query,
-            answer=answer,
-            context=grounded_context,
-            retrieved_chunk_count=len(chunks),
             timings=timings,
         )
 

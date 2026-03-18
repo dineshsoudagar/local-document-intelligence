@@ -16,15 +16,17 @@ from src.retrieval.qwen_models import QwenDenseEmbedder, QwenReranker
 
 @dataclass(slots=True)
 class RetrievedChunk:
-    """Normalized search result returned by the retriever."""
+    """Normalized final ranked result returned by the retriever."""
+
     chunk_id: str
     text: str
     metadata: dict[str, Any]
     source_file: str | None
     page_start: int | None
     page_end: int | None
-    fused_score: float | None
-    rerank_score: float | None = None
+    fused_score: float
+    rerank_score: float
+    final_score: float
 
 
 class QdrantHybridIndex:
@@ -34,7 +36,6 @@ class QdrantHybridIndex:
         config.validate()
         self._config = config
 
-        # Ensure local storage exists before the client is initialized.
         Path(self._config.qdrant_path).mkdir(parents=True, exist_ok=True)
 
         self._client = QdrantClient(path=self._config.qdrant_path)
@@ -43,8 +44,6 @@ class QdrantHybridIndex:
             batch_size=self._config.dense_batch_size,
             show_progress=self._config.show_progress,
         )
-
-        # Reranker is loaded only when search needs it.
         self._reranker: QwenReranker | None = None
 
     def collection_exists(self) -> bool:
@@ -66,7 +65,6 @@ class QdrantHybridIndex:
         texts = [chunk.text for chunk in filtered_chunks]
         avg_doc_len = self._average_document_length(texts)
 
-        # Embeddings and upserts run in batches to keep memory predictable.
         for start in range(0, len(filtered_chunks), self._config.upsert_batch_size):
             batch_chunks = filtered_chunks[start: start + self._config.upsert_batch_size]
             batch_texts = [chunk.text for chunk in batch_chunks]
@@ -98,18 +96,16 @@ class QdrantHybridIndex:
             payload=self._build_payload(chunk),
             vector={
                 self._config.dense_vector_name: dense_vector,
-                # The sparse side is stored from raw text using the configured sparse model.
-                self._config.sparse_vector_name: models.Document(
-                    text=chunk.text,
-                    model=self._config.sparse_model_name,
-                    options={"avg_len": avg_doc_len},
+                self._config.sparse_vector_name: models.SparseVector(
+                    indices=[],
+                    values=[],
                 ),
             },
         )
 
     @staticmethod
     def _build_point_id(chunk: ParsedChunk) -> str:
-        """Build a deterministic point ID from the chunk identifier."""
+        """Return a stable UUID for a parsed chunk."""
         return str(uuid.uuid5(uuid.NAMESPACE_URL, chunk.chunk_id))
 
     @staticmethod
@@ -127,19 +123,16 @@ class QdrantHybridIndex:
         }
 
     def search(self, query: str, top_k: int | None = None) -> list[RetrievedChunk]:
-        """Run hybrid retrieval, then rerank fused candidates."""
+        """Run hybrid retrieval, rerank fused candidates, and blend both scores."""
         fused_limit = self._config.fused_top_k
         final_limit = top_k or self._config.final_top_k
 
-        # Dense and sparse query forms are prepared separately.
         dense_query = self._embedder.encode_query(query)
         sparse_query = models.Document(
             text=query,
             model=self._config.sparse_model_name,
         )
 
-        # Prefetch runs the dense and sparse searches first.
-        # FusionQuery then combines both ranked lists with RRF.
         response = self._client.query_points(
             collection_name=self._config.collection_name,
             prefetch=[
@@ -159,43 +152,61 @@ class QdrantHybridIndex:
             with_payload=True,
         )
 
-        candidates = [self._scored_point_to_result(point) for point in response.points]
-        if not candidates:
+        fused_candidates = [self._scored_point_to_candidate(point) for point in response.points]
+        if not fused_candidates:
             return []
 
         reranker = self._get_reranker()
         rerank_scores = reranker.score(
             query=query,
-            documents=[candidate.text for candidate in candidates],
+            documents=[candidate["text"] for candidate in fused_candidates],
             instruction=self._config.rerank_instruction,
         )
 
-        rescored: list[RetrievedChunk] = []
-        for candidate, rerank_score in zip(candidates, rerank_scores):
-            rescored.append(
+        if len(rerank_scores) != len(fused_candidates):
+            raise RuntimeError(
+                "Reranker returned a mismatched number of scores: "
+                f"{len(rerank_scores)} != {len(fused_candidates)}"
+            )
+
+        fusion_values = [candidate["fused_score"] for candidate in fused_candidates]
+        fusion_norms = self._min_max_normalize(fusion_values)
+        rerank_norms = self._min_max_normalize(rerank_scores)
+
+        fusion_weight, rerank_weight = self._resolve_blend_weights(rerank_scores)
+
+        results: list[RetrievedChunk] = []
+        for candidate, rerank_score, fusion_norm, rerank_norm in zip(
+                fused_candidates,
+                rerank_scores,
+                fusion_norms,
+                rerank_norms,
+        ):
+            final_score = (
+                    fusion_weight * fusion_norm
+                    + rerank_weight * rerank_norm
+            )
+            results.append(
                 RetrievedChunk(
-                    chunk_id=candidate.chunk_id,
-                    text=candidate.text,
-                    metadata=candidate.metadata,
-                    source_file=candidate.source_file,
-                    page_start=candidate.page_start,
-                    page_end=candidate.page_end,
-                    fused_score=candidate.fused_score,
+                    chunk_id=candidate["chunk_id"],
+                    text=candidate["text"],
+                    metadata=candidate["metadata"],
+                    source_file=candidate["source_file"],
+                    page_start=candidate["page_start"],
+                    page_end=candidate["page_end"],
+                    fused_score=candidate["fused_score"],
                     rerank_score=rerank_score,
+                    final_score=final_score,
                 )
             )
 
-        # Final ordering prefers reranker confidence, then fusion score as tie-breaker.
-        rescored.sort(
-            key=lambda item: (
-                item.rerank_score if item.rerank_score is not None else float("-inf"),
-                item.fused_score if item.fused_score is not None else float("-inf"),
-            ),
+        results.sort(
+            key=lambda item: (item.final_score, item.rerank_score, item.fused_score),
             reverse=True,
         )
-        return rescored[:final_limit]
+        return results[:final_limit]
 
-    def debug_search(self, query: str, max_text_len: int = -1) -> dict[str, list[dict[str, Any]]]:
+    def debug_search(self, query: str, max_text_len: int = -1) -> dict[str, Any]:
         """Expose dense, sparse, fused, and reranked stages for inspection."""
         dense_query = self._embedder.encode_query(query)
         sparse_query = models.Document(
@@ -238,37 +249,62 @@ class QdrantHybridIndex:
             with_payload=True,
         )
 
-        fused_candidates = [self._scored_point_to_result(point) for point in fused_response.points]
+        fused_candidates = [self._scored_point_to_candidate(point) for point in fused_response.points]
 
         reranker = self._get_reranker()
         rerank_scores = reranker.score(
             query=query,
-            documents=[candidate.text for candidate in fused_candidates],
+            documents=[candidate["text"] for candidate in fused_candidates],
             instruction=self._config.rerank_instruction,
         )
 
-        reranked = []
-        for candidate, rerank_score in zip(fused_candidates, rerank_scores):
+        if len(rerank_scores) != len(fused_candidates):
+            raise RuntimeError(
+                "Reranker returned a mismatched number of scores: "
+                f"{len(rerank_scores)} != {len(fused_candidates)}"
+            )
+
+        fusion_values = [candidate["fused_score"] for candidate in fused_candidates]
+        fusion_norms = self._min_max_normalize(fusion_values)
+        rerank_norms = self._min_max_normalize(rerank_scores)
+
+        fusion_weight, rerank_weight = self._resolve_blend_weights(rerank_scores)
+
+        reranked: list[dict[str, Any]] = []
+        for candidate, rerank_score, fusion_norm, rerank_norm in zip(
+                fused_candidates,
+                rerank_scores,
+                fusion_norms,
+                rerank_norms,
+        ):
+            final_score = (
+                    fusion_weight * fusion_norm
+                    + rerank_weight * rerank_norm
+            )
             reranked.append(
                 {
-                    "chunk_id": candidate.chunk_id,
-                    "headings": candidate.metadata.get("headings"),
-                    "pages": (candidate.page_start, candidate.page_end),
-                    "fusion_score": candidate.fused_score,
+                    "chunk_id": candidate["chunk_id"],
+                    "headings": candidate["metadata"].get("headings"),
+                    "pages": (candidate["page_start"], candidate["page_end"]),
+                    "fusion_score": candidate["fused_score"],
                     "rerank_score": rerank_score,
-                    "preview": candidate.text[:max_text_len],
+                    "fusion_norm": fusion_norm,
+                    "rerank_norm": rerank_norm,
+                    "final_score": final_score,
+                    "preview": candidate["text"][:max_text_len],
                 }
             )
 
         reranked.sort(
-            key=lambda item: (
-                item["rerank_score"] if item["rerank_score"] is not None else float("-inf"),
-                item["fusion_score"] if item["fusion_score"] is not None else float("-inf"),
-            ),
+            key=lambda item: (item["final_score"], item["rerank_score"], item["fusion_score"]),
             reverse=True,
         )
 
         return {
+            "blend": {
+                "fusion_weight": fusion_weight,
+                "rerank_weight": rerank_weight,
+            },
             "dense": [
                 {
                     "chunk_id": str((point.payload or {}).get("chunk_id") or point.id),
@@ -291,11 +327,11 @@ class QdrantHybridIndex:
             ],
             "fused": [
                 {
-                    "chunk_id": candidate.chunk_id,
-                    "headings": candidate.metadata.get("headings"),
-                    "pages": (candidate.page_start, candidate.page_end),
-                    "fusion_score": candidate.fused_score,
-                    "preview": candidate.text[:max_text_len],
+                    "chunk_id": candidate["chunk_id"],
+                    "headings": candidate["metadata"].get("headings"),
+                    "pages": (candidate["page_start"], candidate["page_end"]),
+                    "fusion_score": candidate["fused_score"],
+                    "preview": candidate["text"][:max_text_len],
                 }
                 for candidate in fused_candidates
             ],
@@ -327,21 +363,24 @@ class QdrantHybridIndex:
         lengths = [len(text.split()) for text in texts]
         return sum(lengths) / len(lengths)
 
-    def _scored_point_to_result(self, point: models.ScoredPoint) -> RetrievedChunk:
-        """Convert a raw Qdrant point into the project result shape."""
+    def _scored_point_to_candidate(self, point: models.ScoredPoint) -> dict[str, Any]:
+        """Convert a raw fused Qdrant point into a validated candidate payload."""
+        if point.score is None:
+            raise RuntimeError("Qdrant returned a fused candidate without a score")
+
         payload = dict(point.payload or {})
         text = str(payload.pop("text", ""))
         chunk_id = str(payload.get("chunk_id") or point.id)
 
-        return RetrievedChunk(
-            chunk_id=chunk_id,
-            text=text,
-            metadata=payload,
-            source_file=payload.get("source_file"),
-            page_start=payload.get("page_start"),
-            page_end=payload.get("page_end"),
-            fused_score=float(point.score) if point.score is not None else None,
-        )
+        return {
+            "chunk_id": chunk_id,
+            "text": text,
+            "metadata": payload,
+            "source_file": payload.get("source_file"),
+            "page_start": payload.get("page_start"),
+            "page_end": payload.get("page_end"),
+            "fused_score": float(point.score),
+        }
 
     def _get_reranker(self) -> QwenReranker:
         """Load the reranker lazily and reuse it across searches."""
@@ -353,45 +392,63 @@ class QdrantHybridIndex:
             )
         return self._reranker
 
-    def _doc_filter(self, doc_id: str) -> models.Filter:
-        """Return a Qdrant filter that matches one logical document."""
-        return models.Filter(
-            must=[
-                models.FieldCondition(
-                    key="doc_id",
-                    match=models.MatchValue(value=doc_id),
-                )
-            ]
-        )
+    def _resolve_blend_weights(self, rerank_scores: list[float]) -> tuple[float, float]:
+        """Choose fusion and rerank weights from reranker score separation."""
+        if not self._config.use_dynamic_blend:
+            return 0.65, 0.35
 
-    def document_exists(self, doc_id: str) -> bool:
-        """Return whether at least one chunk for the document exists."""
-        if not self.collection_exists():
-            return False
+        if not rerank_scores:
+            return 0.75, 0.25
 
-        records, _ = self._client.scroll(
-            collection_name=self._config.collection_name,
-            scroll_filter=self._doc_filter(doc_id),
-            limit=1,
-            with_payload=False,
-            with_vectors=False,
-        )
-        return len(records) > 0
+        # Work on descending scores so rank-1 and rank-2 are explicit.
+        sorted_scores = sorted(rerank_scores, reverse=True)
 
-    def delete_document(self, doc_id: str) -> None:
-        """Delete all indexed chunks for one document."""
-        if not self.collection_exists():
-            return
+        # Compare the best score against the top candidate pool, not the full tail.
+        # Using the full list would let very weak bottom candidates distort the mean.
+        top_n = min(self._config.dynamic_blend_top_n, len(sorted_scores))
+        top_scores = sorted_scores[:top_n]
 
-        self._client.delete(
-            collection_name=self._config.collection_name,
-            points_selector=models.FilterSelector(
-                filter=self._doc_filter(doc_id),
-            ),
-            wait=True,
-        )
+        top1 = sorted_scores[0]
+        top2 = sorted_scores[1] if len(sorted_scores) > 1 else sorted_scores[0]
+        top_mean = sum(top_scores) / len(top_scores)
 
-    def clear(self) -> None:
-        """Delete the entire collection."""
-        if self.collection_exists():
-            self._client.delete_collection(self._config.collection_name)
+        # Separation signals:
+        # - top_gap: how much the best candidate beats the second-best candidate
+        # - top_vs_mean: how much the best candidate stands above the top candidate pool
+        top_gap = top1 - top2
+        top_vs_mean = top1 - top_mean
+
+        # Strong reranker confidence:
+        # require both a clear lead over rank-2 and a clear lead over the top-group mean.
+        if (
+                top_gap >= self._config.rerank_strong_top_gap
+                and top_vs_mean >= self._config.rerank_strong_top_vs_mean
+        ):
+            return 0.45, 0.55
+
+        # Medium reranker confidence:
+        # one moderate separation signal is enough to increase reranker influence slightly.
+        if (
+                top_gap >= self._config.rerank_medium_top_gap
+                or top_vs_mean >= self._config.rerank_medium_top_vs_mean
+        ):
+            return 0.60, 0.40
+
+        # Weak reranker confidence:
+        # scores are too flat to trust reranker strongly, so lean on fusion.
+        return 0.75, 0.25
+
+    @staticmethod
+    def _min_max_normalize(values: list[float]) -> list[float]:
+        """Scale values into the range [0, 1]."""
+        if not values:
+            return []
+
+        min_value = min(values)
+        max_value = max(values)
+
+        if max_value == min_value:
+            return [1.0] * len(values)
+
+        scale = max_value - min_value
+        return [(value - min_value) / scale for value in values]

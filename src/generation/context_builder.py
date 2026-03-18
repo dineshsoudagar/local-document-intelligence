@@ -6,17 +6,7 @@ from dataclasses import dataclass
 from typing import Any, Protocol, Sequence
 
 from src.retrieval.qdrant_hybrid_index import RetrievedChunk
-
-
-class TokenBudgeter(Protocol):
-    """Protocol for text token counting and truncation."""
-
-    def count_tokens(self, text: str) -> int:
-        """Return the token count for a text fragment."""
-
-    def truncate_text(self, text: str, max_tokens: int) -> str:
-        """Return a token-trimmed text fragment."""
-
+from src.retrieval.qwen_models import LocalQwenGenerator
 
 @dataclass(slots=True)
 class AnswerSource:
@@ -57,11 +47,12 @@ class GroundedContext:
 
 
 def build_grounded_context(
-    token_budgeter: TokenBudgeter,
+    generator: LocalQwenGenerator,
     chunks: Sequence[RetrievedChunk],
     *,
     max_context_tokens: int,
     max_chunk_tokens: int,
+
 ) -> GroundedContext:
     """Build a prompt context from retrieved chunks within a token budget."""
     blocks: list[str] = []
@@ -69,7 +60,7 @@ def build_grounded_context(
     used_tokens = 0
 
     for rank, chunk in enumerate(chunks, start=1):
-        text = token_budgeter.truncate_text(chunk.text.strip(), max_chunk_tokens)
+        text = generator.truncate_text(chunk.text.strip(), max_chunk_tokens)
         if not text:
             continue
 
@@ -86,14 +77,14 @@ def build_grounded_context(
             f"[{rank}] headings: {heading_text}\n"
             f"[{rank}] content:\n{text}"
         )
-        block_tokens = token_budgeter.count_tokens(block)
+        block_tokens = generator.count_tokens(block)
 
         if blocks and used_tokens + block_tokens > max_context_tokens:
             break
 
         if not blocks and block_tokens > max_context_tokens:
             shrink_target = max(128, max_context_tokens // 2)
-            trimmed_text = token_budgeter.truncate_text(text, shrink_target)
+            trimmed_text = generator.truncate_text(text, shrink_target)
             block = (
                 f"[{rank}] source_file: {source_file}\n"
                 f"[{rank}] pages: {pages}\n"
@@ -101,7 +92,7 @@ def build_grounded_context(
                 f"[{rank}] headings: {heading_text}\n"
                 f"[{rank}] content:\n{trimmed_text}"
             )
-            block_tokens = token_budgeter.count_tokens(block)
+            block_tokens = generator.count_tokens(block)
 
         if block_tokens > max_context_tokens:
             continue
@@ -117,10 +108,8 @@ def build_grounded_context(
                 page_end=chunk.page_end,
                 rerank_score=chunk.rerank_score,
                 fusion_score=chunk.fused_score,
-                headings=headings if isinstance(headings, list) else None,
-                block_type=str(chunk.metadata.get("block_type"))
-                if chunk.metadata.get("block_type") is not None
-                else None,
+                headings=headings,
+                block_type=str(block_type)
             )
         )
 
