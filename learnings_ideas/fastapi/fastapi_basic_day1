@@ -1,0 +1,421 @@
+What I learned today about FastAPI
+
+1. What FastAPI fundamentally is
+FastAPI is a Python web framework for building APIs.
+At the simplest level, it works like this:
+- create a FastAPI app object
+- define routes on it
+- run it with an ASGI server like uvicorn
+
+Basic pattern:
+app = FastAPI()
+
+@app.get("/health")
+def health():
+    return {"status": "ok"}
+
+Meaning:
+- a request comes in
+- FastAPI matches the HTTP method and path
+- it calls the Python function
+- the returned data becomes JSON
+
+2. What a route decorator does
+A line like:
+
+@app.get("/health")
+
+registers the function below it as the handler for:
+- HTTP GET
+- path /health
+
+So this is not just decoration for style.
+It is how the route gets attached to the app.
+
+3. FastAPI automatically converts Python return values into JSON
+When a route returns a dict, FastAPI serializes it to JSON.
+Example:
+return {"status": "ok"}
+
+becomes:
+{"status":"ok"}
+
+4. What uvicorn does
+FastAPI itself is the framework.
+uvicorn is the server process that actually runs the app.
+
+Command:
+python -m uvicorn src.api.main:app --reload
+
+Meaning:
+- import app from src/api/main.py
+- run it as an ASGI app
+- reload when files change
+
+Important:
+If uvicorn does not successfully bind to the port, my new code is not running.
+
+5. Why I got confused for so long
+The main issue was not FastAPI, not validators, not route logic.
+The real issue was:
+- port 8000 was already occupied by an old process
+- the new server failed to start
+- I kept sending requests to the old still-running server
+- so my code changes looked like they were not working
+
+This taught me a major debugging lesson:
+always verify that the server actually started on the port I think it did.
+
+6. Difference between the app object and APIRouter
+FastAPI app:
+- root application object
+- final container for all routes
+
+APIRouter:
+- route group
+- used to organize endpoints by concern
+
+Example:
+- routes_health.py
+- routes_documents.py
+
+Pattern:
+router = APIRouter()
+
+@router.get("/health")
+def health():
+    ...
+
+Then in main.py:
+app.include_router(health_router)
+
+Meaning:
+- create routes inside a router
+- attach the router to the main app later
+
+7. Why route separation matters
+Keeping all routes inside main.py becomes messy fast.
+Better:
+- main.py builds the app
+- route files define endpoints
+- models files define request and response schemas
+- helper/state files define shared app objects
+
+This separation makes the codebase scalable and easier to reason about.
+
+8. What app.state is
+app.state is a place to store shared application-level objects.
+
+Example:
+app.state.paths = AppPaths(base_dir=Path("storage"))
+
+This lets the whole app reuse a shared object without recreating it everywhere.
+
+This is useful for:
+- storage paths
+- registry object
+- index service
+- answer service
+
+9. How shared objects can be accessed
+One clean pattern is:
+- store object in app.state
+- access it through a helper function
+- inject it into routes using Depends
+
+Example idea:
+paths: AppPaths = Depends(get_app_paths_from_state)
+
+Meaning:
+FastAPI calls the helper, gets the value, and passes it into the route.
+
+10. What Depends does
+Depends is FastAPI dependency injection.
+
+It means:
+- before running the route
+- call another function
+- use its return value as an input to the route
+
+This is useful because later routes can cleanly receive:
+- paths
+- database session
+- services
+- configuration objects
+
+without manually pulling them from request.app.state every time.
+
+11. How FastAPI resolves dependency inputs
+If a dependency function asks for Request:
+
+def get_app_paths_from_state(request: Request) -> AppPaths:
+    return request.app.state.paths
+
+FastAPI automatically provides the Request object.
+So dependencies themselves can have dependencies or framework-provided objects.
+
+12. What Pydantic models do in FastAPI
+Pydantic models define structured input and output shapes.
+
+Example request model:
+class DocumentIngestRequest(BaseModel):
+    source_path: str
+
+Example response model:
+class DocumentIngestResponse(BaseModel):
+    message: str
+    source_path: str
+
+These models are used for:
+- request body parsing
+- validation
+- documentation
+- response shaping
+
+13. What response_model does
+Example:
+@router.post("/documents/ingest", response_model=DocumentIngestResponse)
+
+This tells FastAPI:
+- the route returns data of this shape
+- validate/document the response accordingly
+
+It improves:
+- Swagger docs
+- response consistency
+- API clarity
+
+14. Difference between request body model and route logic
+If a route parameter is typed as a Pydantic model:
+
+def ingest_document(request: DocumentIngestRequest):
+
+FastAPI:
+- reads the incoming JSON
+- validates it against the model
+- only then calls the route function
+
+So request validation happens before route logic executes.
+
+15. What field_validator does
+A field validator validates a specific field in a Pydantic model.
+
+Example:
+@field_validator("source_path")
+@classmethod
+def validate_source_path(cls, value: str) -> str:
+    value = value.strip()
+    if not value:
+        raise ValueError("source_path must not be empty.")
+    return value
+
+Meaning:
+- when the model is constructed
+- this validator runs for source_path
+- if it raises ValueError, validation fails
+
+16. What 422 means in FastAPI
+A 422 response usually means:
+the request body failed validation.
+
+Typical reasons:
+- missing field
+- wrong type
+- failed Pydantic validator
+
+This happens before the route function runs.
+
+17. Better API design I learned today
+There is a difference between:
+- schema validation
+- runtime or business validation
+
+Schema validation:
+- field exists
+- type is string
+- not blank
+
+Runtime/business validation:
+- file must be a PDF
+- file must exist
+- path must point to a file
+
+Better design:
+- keep the Pydantic model simple
+- do file-system and business checks inside the route or service
+- return HTTPException with appropriate status codes
+
+18. Good separation of errors
+What I should aim for:
+- 422 for malformed request or failed schema validation
+- 400 for bad input at business logic level
+- 404 for missing resources like file not found
+
+This is cleaner than forcing all problems into 422.
+
+19. What HTTPException is for
+FastAPI uses HTTPException to return explicit API errors.
+
+Example:
+raise HTTPException(
+    status_code=404,
+    detail="source_path does not exist.",
+)
+
+This lets the API communicate meaningful failure reasons cleanly.
+
+20. Why Swagger docs confused me
+Swagger UI at /docs shows:
+- actual server responses
+- schema examples
+- possible documented error responses
+
+I confused the documented 422 schema with a real 422 response.
+
+Key lesson:
+Do not trust Swagger UI alone when debugging behavior.
+Trust:
+- actual response code
+- terminal logs
+- direct API calls from PowerShell or curl
+
+21. Better way to verify actual API behavior
+Instead of relying only on /docs, use PowerShell:
+
+Invoke-RestMethod -Method Post -Uri "http://127.0.0.1:8000/documents/ingest" -ContentType "application/json" -Body '{"source_path":"docs"}'
+
+This gives the real runtime response.
+
+22. Startup handling in FastAPI
+There are two patterns:
+- old startup event decorator
+- newer lifespan pattern
+
+Old style:
+@app.on_event("startup")
+
+New style:
+lifespan=app_lifespan
+
+Important:
+The old startup event style still works, but it is deprecated.
+The newer recommended style is lifespan.
+
+23. What startup code is for
+Startup is where app-wide initialization happens, like:
+- creating folders
+- preparing storage
+- loading services
+- initializing shared objects
+
+In my case:
+app.state.paths.ensure_exists()
+
+24. What my AppPaths utility is doing
+AppPaths centralizes storage locations:
+- base_dir
+- documents_dir
+- metadata_dir
+- qdrant_dir
+
+This avoids scattering hardcoded paths throughout the codebase.
+
+That is important because path logic becomes messy quickly in real apps.
+
+25. Why naming matters
+Shorthand names like deps.py are common, but not great for learning.
+Clear names like:
+- app_state.py
+- routes_documents.py
+- models_documents.py
+
+are easier to reason about and explain in interviews.
+
+26. Good code organization pattern learned today
+A clean structure looks like:
+- main.py for app creation
+- routes_*.py for endpoints
+- models_*.py for Pydantic schemas
+- app_state.py for shared state helpers
+- app/paths.py for storage path logic
+
+This is a useful starter backend architecture.
+
+27. Major debugging lesson from today
+If behavior looks impossible, suspect environment/runtime first.
+
+Examples:
+- wrong port
+- stale process
+- wrong file being served
+- reload not actually applying changes
+
+I wasted time reasoning about framework behavior when the actual issue was an old server process still owning port 8000.
+
+28. Very practical dev rule
+Before assuming my code is broken, verify:
+- server started successfully
+- correct port is used
+- no bind error occurred
+- the process I am testing is the process I just started
+
+29. What I now understand about interview-level FastAPI basics
+I can now explain:
+- what FastAPI is
+- what a route decorator does
+- how request handling works
+- what APIRouter is
+- how request models work
+- how response_model works
+- how validation happens before the route
+- how Depends injects dependencies
+- how app.state stores shared objects
+- what HTTPException is used for
+- the difference between startup hooks and route handling
+- why schema validation and business validation should be separated
+
+Very important interview points to remember
+
+1. FastAPI route flow
+Request -> route matching -> validation -> function execution -> JSON response
+
+2. Pydantic request model timing
+Validation happens before the route function executes.
+
+3. APIRouter purpose
+Used to group related endpoints and keep the app modular.
+
+4. Depends purpose
+Dependency injection for shared objects or reusable logic.
+
+5. app.state purpose
+Store shared application-wide objects initialized once.
+
+6. response_model purpose
+Documents and validates the outgoing response shape.
+
+7. HTTPException purpose
+Return explicit API errors with proper HTTP status codes.
+
+8. 422 meaning
+Usually request validation failure, not route logic failure.
+
+9. Startup versus request lifecycle
+Startup code runs once when the app starts.
+Route code runs per request.
+
+10. Real-world debugging rule
+If code changes are not reflected, check:
+- wrong port
+- stale process
+- failed bind
+- old server still running
+
+Summary
+
+Today I learned the core mental model of FastAPI:
+a FastAPI app is an application object with registered routes, powered by uvicorn, using Pydantic for request and response validation.
+Routes can be grouped with APIRouter, shared objects can live in app.state, and dependencies can be injected with Depends.
+I also learned an important backend design principle: request models should handle basic schema validation,
+while runtime or business validation should live in the route or service layer. The biggest practical lesson was not even about FastAPI syntax.
+It was about debugging discipline. If the server does not successfully start, I am not testing my new code, no matter how much I change the files.
