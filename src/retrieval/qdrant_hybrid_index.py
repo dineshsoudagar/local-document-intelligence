@@ -122,7 +122,26 @@ class QdrantHybridIndex:
             **chunk.metadata,
         }
 
-    def search(self, query: str, top_k: int | None = None) -> list[RetrievedChunk]:
+    def _build_doc_filter(self, doc_ids: list[str] | None) -> models.Filter | None:
+        """Filter the retrieval only to the input doc_ids"""
+        if not doc_ids:
+            return None
+
+        return models.Filter(
+            must=[
+                models.FieldCondition(
+                    key="doc_id",
+                    match=models.MatchAny(any=doc_ids),
+                )
+            ]
+        )
+
+    def search(
+            self,
+            query: str,
+            top_k: int | None = None,
+            doc_ids: list[str] | None = None,
+    ) -> list[RetrievedChunk]:
         """Run hybrid retrieval, rerank fused candidates, and blend both scores."""
         fused_limit = self._config.fused_top_k
         final_limit = top_k or self._config.final_top_k
@@ -132,6 +151,7 @@ class QdrantHybridIndex:
             text=query,
             model=self._config.sparse_model_name,
         )
+        doc_filter = self._build_doc_filter(doc_ids)
 
         response = self._client.query_points(
             collection_name=self._config.collection_name,
@@ -140,16 +160,19 @@ class QdrantHybridIndex:
                     query=sparse_query,
                     using=self._config.sparse_vector_name,
                     limit=self._config.sparse_top_k,
+                    filter=doc_filter
                 ),
                 models.Prefetch(
                     query=dense_query,
                     using=self._config.dense_vector_name,
                     limit=self._config.dense_top_k,
+                    filter=doc_filter
                 ),
             ],
             query=models.FusionQuery(fusion=models.Fusion.RRF),
             limit=fused_limit,
             with_payload=True,
+            query_filter=doc_filter,
         )
 
         fused_candidates = [self._scored_point_to_candidate(point) for point in response.points]
@@ -452,6 +475,9 @@ class QdrantHybridIndex:
 
         scale = max_value - min_value
         return [(value - min_value) / scale for value in values]
+
+    def close(self) -> None:
+        self._client.close()
 
     def clear(self) -> None:
         """Delete the configured collection if it exists."""

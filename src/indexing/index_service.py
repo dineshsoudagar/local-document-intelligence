@@ -86,3 +86,6 @@ class IndexService:
         digest = hashlib.sha1(path.read_bytes()).hexdigest()[:12]
         stem = path.stem.strip().replace(" ", "_").replace("-", "_").lower()
         return f"{stem}_{digest}"
+
+    def close(self) -> None:
+        self._index.close()

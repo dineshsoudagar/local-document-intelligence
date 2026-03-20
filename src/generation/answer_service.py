@@ -80,10 +80,14 @@ class GroundedAnswerService:
             self._generator = LocalQwenGenerator(self._config.generator_model_path)
         return self._generator
 
-    def retrieve(self, query: str) -> tuple[list[RetrievedChunk], float]:
+    def retrieve(
+            self,
+            query: str,
+            doc_ids: list[str] | None = None,
+    ) -> tuple[list[RetrievedChunk], float]:
         """Run retrieval for the supplied query."""
         started_at = time.perf_counter()
-        chunks = self._index.search(query)
+        chunks = self._index.search(query, doc_ids=doc_ids)
         elapsed = time.perf_counter() - started_at
         return chunks, elapsed
 
@@ -146,9 +150,10 @@ class GroundedAnswerService:
     def stream_answer(
             self,
             query: str,
+            doc_ids: list[str] | None = None
     ) -> tuple[GroundedContext, int, float, Iterator[str]]:
         """Prepare grounded context and return a text stream for generation."""
-        retrieved_chunks, retrieval_seconds = self.retrieve(query)
+        retrieved_chunks, retrieval_seconds = self.retrieve(query, doc_ids=doc_ids)
 
         if not retrieved_chunks:
             def empty_stream() -> Iterator[str]:
@@ -207,7 +212,7 @@ class GroundedAnswerService:
             fallback_reason=fallback_reason,
         )
 
-    def answer(self, query: str, *, mode: str = "grounded") -> GroundedAnswerResult:
+    def answer(self, query: str, *, mode: str = "grounded", doc_ids: list[str] | None = None) -> GroundedAnswerResult:
         """Answer in grounded, chat, or auto mode."""
         if mode not in {"grounded", "chat", "auto"}:
             raise ValueError(f"Unsupported mode: {mode}")
@@ -233,7 +238,7 @@ class GroundedAnswerService:
                 mode_used="chat",
             )
 
-        retrieved_chunks, retrieval_seconds = self.retrieve(query)
+        retrieved_chunks, retrieval_seconds = self.retrieve(query, doc_ids=doc_ids)
 
         if mode == "auto":
             use_grounded, fallback_reason = self.should_use_grounded(retrieved_chunks)
