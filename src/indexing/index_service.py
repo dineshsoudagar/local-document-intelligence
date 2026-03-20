@@ -54,6 +54,13 @@ class IndexService:
         self._index.build(chunks=chunks, rebuild=False)
         return len(chunks)
 
+    def reindex_document(self, pdf_path: str | Path, doc_id: str) -> int:
+        path = Path(pdf_path).resolve()
+        self._index.delete_document(doc_id)
+        chunks = self._parser.parse(path, doc_id=doc_id)
+        self._index.build(chunks=chunks, rebuild=False)
+        return len(chunks)
+
     def ingest_pdf(self, pdf_path: str | Path) -> str:
         """Index one PDF if missing and return its doc_id."""
         return self.ensure_pdf_indexed(pdf_path)

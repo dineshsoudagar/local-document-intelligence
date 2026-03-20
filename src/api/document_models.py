@@ -86,3 +86,8 @@ class DocumentIngestResponse(BaseModel):
 class DocumentDeleteResponse(BaseModel):
     message: str
     doc_id: str
+
+
+class DocumentReindexResponse(BaseModel):
+    message: str
+    document: DocumentSummaryResponse

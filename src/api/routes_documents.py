@@ -17,6 +17,7 @@ from src.api.document_models import (
     DocumentIngestResponse,
     DocumentsListResponse,
     DocumentSummaryResponse,
+    DocumentReindexResponse
 )
 from src.app.document_registry import DocumentRegistry
 from src.app.paths import AppPaths
@@ -44,14 +45,12 @@ def _build_managed_document_path(paths: AppPaths, doc_id: str, suffix: str) -> P
     return paths.documents_dir / f"{doc_id}{suffix.lower()}"
 
 
-# Learning:
 # `@router.get("/documents", response_model=DocumentsListResponse)` registers
 # an HTTP GET endpoint at /documents.
 # `response_model=...` tells FastAPI what JSON shape this route should return,
 # and FastAPI uses that for validation and OpenAPI docs.
 @router.get("/documents", response_model=DocumentsListResponse)
 def list_documents(
-        # Learning:
         # FastAPI dependency injection:
         # `Depends(get_document_registry_from_state)` tells FastAPI to call that function
         # and give the returned DocumentRegistry object to this route.
@@ -66,7 +65,6 @@ def list_documents(
     )
 
 
-# Learning:
 # A route can receive more than one dependency.
 # Here FastAPI injects both:
 # - the shared DocumentRegistry
@@ -168,7 +166,53 @@ def ingest_document(
     )
 
 
-# Learning:
+@router.post("/documents/{doc_id}/reindex", response_model=DocumentReindexResponse)
+def reindex_document(
+        doc_id: str,
+        registry: DocumentRegistry = Depends(get_document_registry_from_state),
+        index_service: IndexService = Depends(get_index_service_from_state),
+) -> DocumentReindexResponse:
+    existing = registry.get_document(doc_id)
+    if existing is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Document not found.",
+        )
+    registry.mark_pending(doc_id=doc_id)
+    try:
+        chunk_count = index_service.reindex_document(
+            pdf_path=existing.stored_path,
+            doc_id=doc_id,
+        )
+        indexed_at = _utc_now_iso()
+        registry.mark_indexed(
+            doc_id=doc_id,
+            chunk_count=chunk_count,
+            indexed_at=indexed_at,
+        )
+    except Exception as exc:
+        registry.mark_failed(
+            doc_id=doc_id,
+            error_message=str(exc),
+        )
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Reindex failed: {exc}",
+        ) from exc
+
+    updated = registry.get_document(doc_id)
+    if updated is None:
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="Document was reindexed but could not be reloaded.",
+        )
+
+    return DocumentReindexResponse(
+        message="Document reindexed.",
+        document=DocumentSummaryResponse.from_record(updated),
+    )
+
+
 # Path parameter:
 # In "/documents/{doc_id}", the `{doc_id}` part is taken from the URL
 # and passed into the function argument named `doc_id`.

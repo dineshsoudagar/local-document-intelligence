@@ -231,3 +231,15 @@ class DocumentRegistry:
             indexed_at=row["indexed_at"],
             last_error=row["last_error"],
         )
+
+    def mark_pending(self, *, doc_id: str) -> None:
+        with self._connect() as connection:
+            connection.execute(
+                """
+                UPDATE documents
+                SET indexed_status = ?, last_error = NULL
+                WHERE doc_id = ?
+                """,
+                ("pending", doc_id),
+            )
+            connection.commit()
