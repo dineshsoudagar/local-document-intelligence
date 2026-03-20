@@ -84,4 +84,4 @@ if (-not (Test-PortFree -LocalPort $selectedPort)) {
 }
 
 Write-Host "Starting API on port $selectedPort"
-python -m uvicorn src.api.main:app --port $selectedPort
+python -m uvicorn src.api.main:app --port $selectedPort --reload
