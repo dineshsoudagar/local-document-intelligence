@@ -452,3 +452,50 @@ class QdrantHybridIndex:
 
         scale = max_value - min_value
         return [(value - min_value) / scale for value in values]
+
+    def clear(self) -> None:
+        """Delete the configured collection if it exists."""
+        if self.collection_exists():
+            self._client.delete_collection(self._config.collection_name)
+
+    def document_exists(self, doc_id: str) -> bool:
+        """Return whether any chunk for the document exists in the collection."""
+        if not self.collection_exists():
+            return False
+
+        response = self._client.scroll(
+            collection_name=self._config.collection_name,
+            scroll_filter=models.Filter(
+                must=[
+                    models.FieldCondition(
+                        key="doc_id",
+                        match=models.MatchValue(value=doc_id),
+                    )
+                ]
+            ),
+            limit=1,
+            with_payload=False,
+            with_vectors=False,
+        )
+        points, _ = response
+        return bool(points)
+
+    def delete_document(self, doc_id: str) -> None:
+        """Delete all chunks belonging to one document."""
+        if not self.collection_exists():
+            return
+
+        self._client.delete(
+            collection_name=self._config.collection_name,
+            points_selector=models.FilterSelector(
+                filter=models.Filter(
+                    must=[
+                        models.FieldCondition(
+                            key="doc_id",
+                            match=models.MatchValue(value=doc_id),
+                        )
+                    ]
+                )
+            ),
+            wait=True,
+        )
