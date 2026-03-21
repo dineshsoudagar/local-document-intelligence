@@ -1,0 +1,342 @@
+Basic REST API interview notes
+
+1. What is API?
+API stands for Application Programming Interface.
+
+It is a way for two software systems to communicate with each other.
+In web development, an API usually means one application sends an HTTP request and another application returns a response.
+
+Example:
+A frontend sends a request to a backend API to fetch user data.
+
+2. What is REST?
+REST stands for Representational State Transfer.
+
+It is an architectural style for designing networked APIs.
+A REST API uses standard HTTP methods and treats data as resources.
+
+Example resource:
+- users
+- documents
+- orders
+
+Example REST-style endpoints:
+- GET /users
+- POST /users
+- GET /users/10
+- DELETE /users/10
+
+3. What is REST API?
+A REST API is an API designed using REST principles.
+
+Usually it:
+- uses HTTP
+- exposes resources through URLs
+- uses standard methods like GET, POST, PUT, DELETE
+- is stateless
+
+4. What does stateless mean?
+Stateless means each request contains all the information needed to process it.
+
+The server should not depend on hidden memory from previous requests.
+
+Example:
+If authentication is needed, the client should send the token with each request.
+
+5. What is a resource in REST?
+A resource is the thing the API is exposing.
+
+Examples:
+- a user
+- a document
+- a product
+- an order
+
+Resource examples in URLs:
+- /users
+- /documents
+- /orders/25
+
+6. What is URI?
+URI stands for Uniform Resource Identifier.
+
+It is a string that identifies a resource.
+
+A URL is a type of URI.
+
+Example:
+https://example.com/documents/10
+
+7. What is URL?
+URL stands for Uniform Resource Locator.
+
+It tells both:
+- what the resource is
+- where to find it
+
+Example:
+https://api.example.com/users/5
+
+8. URI vs URL
+URI is the broader term.
+URL is a specific kind of URI.
+
+In interviews, many people use them loosely, but technically:
+- every URL is a URI
+- not every URI is necessarily a URL
+
+9. What is an endpoint?
+An endpoint is a specific API route exposed by the server.
+
+Examples:
+- GET /health
+- POST /documents/ingest
+- GET /users/12
+
+10. Common HTTP methods
+GET
+- fetch data
+
+POST
+- create data
+
+PUT
+- replace/update a resource fully
+
+PATCH
+- partially update a resource
+
+DELETE
+- remove a resource
+
+11. Difference between GET and POST
+GET
+- used to fetch data
+- should not change server state
+
+POST
+- used to send data and usually create or trigger something
+- can change server state
+
+12. What is request?
+A request is what the client sends to the server.
+
+It usually contains:
+- method
+- URL
+- headers
+- optional body
+
+13. What is response?
+A response is what the server sends back.
+
+It usually contains:
+- status code
+- headers
+- body
+
+14. What is JSON?
+JSON stands for JavaScript Object Notation.
+
+It is the most common format used to send data in REST APIs.
+
+Example:
+{
+  "name": "Dinesh",
+  "role": "AI engineer"
+}
+
+15. What is status code?
+A status code tells the result of the request.
+
+Common ones:
+200 OK
+- request succeeded
+
+201 Created
+- resource created successfully
+
+400 Bad Request
+- invalid input
+
+401 Unauthorized
+- authentication required or failed
+
+403 Forbidden
+- authenticated but not allowed
+
+404 Not Found
+- resource does not exist
+
+422 Unprocessable Entity
+- request format is valid but validation failed
+
+500 Internal Server Error
+- server-side failure
+
+16. What is  ?
+CRUD means:
+- Create
+- Read
+- Update
+- Delete
+
+Mapped to HTTP often as:
+- Create -> POST
+- Read -> GET
+- Update -> PUT/PATCH
+- Delete -> DELETE
+
+17. What is idempotent?
+An operation is idempotent if calling it multiple times has the same effect as calling it once.
+
+Examples:
+- GET is idempotent
+- PUT is usually idempotent
+- DELETE is usually idempotent
+- POST is usually not idempotent
+
+18. What is header?
+Headers carry metadata about the request or response.
+
+Examples:
+- Content-Type
+- Authorization
+- Accept
+
+19. What is Content-Type?
+Content-Type tells the server what kind of body is being sent.
+
+Example:
+Content-Type: application/json
+
+20. What is query parameter?
+Query parameters are key-value pairs in the URL after ?.
+
+Example:
+GET /documents?limit=10&sort=desc
+
+Here:
+- limit=10
+- sort=desc
+
+21. What is path parameter?
+A path parameter is a variable inside the URL path.
+
+Example:
+GET /users/42
+
+Here 42 is usually the path parameter.
+
+22. What is request body?
+The request body contains the main data sent to the server, usually with POST, PUT, or PATCH.
+
+Example:
+POST /users
+{
+  "name": "Dinesh"
+}
+
+23. What is authentication vs authorization?
+Authentication
+- who are you?
+
+Authorization
+- what are you allowed to do?
+
+24. What is OpenAPI?
+OpenAPI is a standard way to describe APIs.
+
+FastAPI uses OpenAPI to generate docs automatically.
+
+25. What is Swagger UI?
+Swagger UI is a web interface for viewing and testing API endpoints.
+
+In FastAPI, it is usually available at:
+- /docs
+
+26. What is FastAPI?
+FastAPI is a Python framework for building APIs.
+It uses:
+- Python type hints
+- Pydantic for validation
+- automatic OpenAPI docs
+
+27. What is Pydantic used for in FastAPI?
+Pydantic is used for:
+- request validation
+- response validation
+- data parsing
+- schema generation
+
+28. What is dependency injection in FastAPI?
+Dependency injection means FastAPI can provide required objects to route functions automatically.
+
+Example:
+- database session
+- config object
+- shared service
+
+29. What is app state in FastAPI?
+app.state stores shared application-level objects.
+
+Example:
+- storage paths
+- service instances
+- loaded models
+
+30. One-line interview summary
+A REST API is a stateless HTTP-based interface where resources are exposed through endpoints, data is commonly exchanged as JSON, standard HTTP methods represent actions, and status codes communicate the result.
+
+Must-know short answers
+
+API
+Application Programming Interface
+
+REST
+Representational State Transfer
+
+URI
+Uniform Resource Identifier
+
+URL
+Uniform Resource Locator
+
+JSON
+JavaScript Object Notation
+
+CRUD
+Create, Read, Update, Delete
+
+GET
+Read/fetch data
+
+POST
+Create/send data
+
+PUT
+Replace/update full resource
+
+PATCH
+Partially update resource
+
+DELETE
+Remove resource
+
+200
+Success
+
+201
+Created
+
+400
+Bad request
+
+404
+Not found
+
+422
+Validation error
+
+500
+Server error
