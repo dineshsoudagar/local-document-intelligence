@@ -1,0 +1,89 @@
+We started building the V1 frontend for the offline document intelligence system using the existing FastAPI backend.
+
+Current architecture:
+- FastAPI backend running on localhost:8000
+- React + TypeScript frontend created with Vite
+- frontend runs locally and calls backend over HTTP
+- Tauri is postponed for later packaging, not part of current implementation
+
+What we implemented in the frontend:
+- Vite React TypeScript app created successfully
+- default Vite demo removed
+- 3-pane desktop-style layout created
+  - left pane = Documents
+  - center pane = Query Workspace
+  - right pane = Evidence
+- backend CORS added in FastAPI so React frontend can call localhost:8000
+- GET /documents is called from React using fetch
+- uploaded documents are shown in the left sidebar
+- clicking a document selects it
+- query input field added
+- Ask button added
+- POST /query works from the frontend
+- answer is shown in the center pane
+- UI mode simplified into one user-facing mode selector:
+  - corpus
+  - document
+  - chat
+  - auto
+- frontend maps UI mode to backend request payload
+- right pane now shows evidence sources
+- CSS improved to a cleaner light theme
+
+Important frontend design decisions:
+- we removed the separate UI controls for query scope and query mode because it was confusing
+- we now use one UI mode selector and map it internally to backend mode + optional doc_ids
+- we decided one-line ternaries like className={condition ? a : b} are okay to keep because they are readable enough
+- we removed dead UI debug text like current mode / selected document / current query display
+
+Current frontend App.tsx state:
+- documents state
+- error state for document loading
+- selectedDocId state
+- uiMode state
+- queryText state
+- answer state
+- sources state
+- queryError state
+- isSubmitting state
+
+Important backend discussion:
+- I thought generator model was loading on every query
+- we checked backend code and found generator is lazy-loaded once, not per request
+- then we preloaded the generator at FastAPI startup by creating LocalQwenGenerator in lifespan and passing it into GroundedAnswerService
+- this makes startup slower but first query faster
+
+Important backend filename discussion:
+Problem:
+- query response sources return source_file like doc_xxx.pdf instead of original uploaded filename
+- root cause is source_file in indexed chunk metadata comes from managed stored filename, not original filename
+
+We considered 3 options:
+1. propagate original_filename through parser, chunk model, index, retrieval, and query response
+2. rename stored files to original filenames
+3. quick fix in query route using registry
+
+Decision:
+- broad propagation through the whole indexing pipeline felt too heavy for now
+- renaming stored files directly was rejected because doc_id-based managed storage avoids collisions
+- best V1 fix is to keep current index structure and add original_filename in the query route response using registry lookup
+
+Important correction:
+- we noticed doc_id already exists in chunk payload / retrieval data
+- so we should not parse doc_id from chunk_id string
+- in the next chat, backend fix should use the existing doc_id field instead
+
+What should happen next in the new chat:
+1. cleanly patch backend query response to include original_filename in each source
+2. use doc_id directly, not parsing it from chunk_id
+3. update frontend evidence pane to display original_filename instead of source_file
+4. possibly show mode_used and fallback_reason in the center pane for auto mode
+5. continue UI iteration in small surgical steps
+
+User preferences for the new chat:
+- keep one thing at a time
+- keep explanations short and simple
+- give surgical edits, not giant dumps
+- always add useful comments in App.tsx code
+- avoid too much text
+- user is learning, so explain code briefly and clearly
