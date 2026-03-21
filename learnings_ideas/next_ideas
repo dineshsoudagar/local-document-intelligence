@@ -19,3 +19,4 @@ useful links : https://docling-project.github.io/docling/examples/pictures_descr
 
 
 # Fix two chunkers with docling
+# fix original doc id in the chunk itself or in answer service.
