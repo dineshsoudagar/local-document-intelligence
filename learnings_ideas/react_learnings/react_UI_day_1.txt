@@ -1,6 +1,58 @@
-We started building the V1 frontend for the offline document intelligence system using the existing FastAPI backend.
+21-March-2026
+Today I moved from backend-only work into the first real frontend integration phase of the offline document intelligence system.
 
+What I built:
+- created a React + TypeScript frontend with Vite
+- connected the frontend to the FastAPI backend running on localhost
+- fixed CORS so the browser app could call the backend
+- built the initial 3-pane application shell
+- loaded document data from GET /documents
+- rendered the uploaded document list in the sidebar
+- added document selection behavior
+- added a query input box
+- added query submit flow using POST /query
+- displayed generated answers in the center pane
+- added user-facing modes: corpus, document, chat, auto
+- displayed retrieved evidence in the right pane
+- improved the CSS so the app looks like an actual usable product and not a default demo
+
+What I learned technically:
+- FastAPI is not a browser thing; it is a Python web server exposing local HTTP endpoints
+- React is not a language; it is a UI library used with JavaScript or TypeScript
+- React can be used to build web applications that talk to a Python backend over HTTP
+- Tauri does not replace React or FastAPI; it can later package the React frontend as a desktop app
+- packaging with Tauri is a later distribution concern, not something that forces a rewrite now
+- frontend and backend should stay separated by a clean HTTP boundary
+- in React, state is what lets the UI remember user choices and data
+- useEffect is used to run logic like loading documents when the component starts
+- useState stores values like documents, selected document, query text, answer, and loading state
+- fetch is how the frontend calls backend endpoints
+- React only shows fields that I explicitly render; backend data existing is not enough
+- the key prop in a list is mainly for React’s internal list update logic
+- a ternary expression is just a short form of if/else
+- for this project, readability matters more than tiny performance differences between ternary and if/else
+
+What I learned about product and architecture:
+- it was a mistake to expose both scope and mode separately in the UI
+- simplifying the UI to a single user-facing mode selector is cleaner
+- internal backend models and user-facing UI controls do not have to match 1:1
+- generator loading behavior matters for user experience
+- preloading the model at app startup is a good tradeoff for a desktop-style local app
+- original filenames are a metadata/display concern and should come from the document registry, which is the source of truth
+- trying to push original_filename through the whole parser/index/retrieval pipeline right now is more work than needed for V1
+- the cleaner immediate fix is to enrich query response sources using the registry and existing doc_id
+
+What I should remember:
+- build in small slices
+- do not overcomplicate the UI before the flow works
+- keep backend truth and frontend display concerns separate
+- prefer correct simple fixes over broad structural changes when the product is still in V1
+
+
+
+We started building the V1 frontend for the offline document intelligence system using the existing FastAPI backend.
 Current architecture:
+
 - FastAPI backend running on localhost:8000
 - React + TypeScript frontend created with Vite
 - frontend runs locally and calls backend over HTTP
