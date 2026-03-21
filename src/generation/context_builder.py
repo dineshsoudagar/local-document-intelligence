@@ -3,10 +3,11 @@ from __future__ import annotations
 """Utilities for building grounded prompt context and rendering answer sources."""
 
 from dataclasses import dataclass
-from typing import Any, Protocol, Sequence
+from typing import Any, Sequence
 
 from src.retrieval.qdrant_hybrid_index import RetrievedChunk
 from src.retrieval.qwen_models import LocalQwenGenerator
+
 
 @dataclass(slots=True)
 class AnswerSource:
@@ -14,7 +15,9 @@ class AnswerSource:
 
     rank: int
     chunk_id: str
+    doc_id: str | None
     source_file: str | None
+    original_filename: str | None
     page_start: int | None
     page_end: int | None
     rerank_score: float | None
@@ -27,7 +30,9 @@ class AnswerSource:
         return {
             "rank": self.rank,
             "chunk_id": self.chunk_id,
+            "doc_id": self.doc_id,
             "source_file": self.source_file,
+            "original_filename": self.original_filename,
             "page_start": self.page_start,
             "page_end": self.page_end,
             "rerank_score": self.rerank_score,
@@ -52,7 +57,6 @@ def build_grounded_context(
     *,
     max_context_tokens: int,
     max_chunk_tokens: int,
-
 ) -> GroundedContext:
     """Build a prompt context from retrieved chunks within a token budget."""
     blocks: list[str] = []
@@ -68,6 +72,7 @@ def build_grounded_context(
         heading_text = " > ".join(headings) if isinstance(headings, list) and headings else "-"
         block_type = str(chunk.metadata.get("block_type") or "text")
         source_file = chunk.source_file or "unknown"
+        doc_id = chunk.metadata.get("doc_id")
         pages = format_pages(chunk.page_start, chunk.page_end)
 
         block = (
@@ -103,13 +108,15 @@ def build_grounded_context(
             AnswerSource(
                 rank=rank,
                 chunk_id=chunk.chunk_id,
+                doc_id=str(doc_id) if doc_id else None,
                 source_file=chunk.source_file,
+                original_filename=None,
                 page_start=chunk.page_start,
                 page_end=chunk.page_end,
                 rerank_score=chunk.rerank_score,
                 fusion_score=chunk.fused_score,
                 headings=headings,
-                block_type=str(block_type)
+                block_type=block_type,
             )
         )
 
@@ -118,7 +125,6 @@ def build_grounded_context(
         sources=sources,
         used_tokens=used_tokens,
     )
-
 
 def format_pages(page_start: int | None, page_end: int | None) -> str:
     """Return a stable printable page span."""

@@ -29,7 +29,9 @@ type QueryRequestPayload = {
 type QuerySource = {
   rank: number;
   chunk_id: string;
+  doc_id?: string | null;
   source_file: string | null;
+  original_filename?: string | null;
   page_start: number | null;
   page_end: number | null;
   rerank_score: number | null;
@@ -280,7 +282,8 @@ export default function App() {
           {sortedSources.map((source) => (
             <li key={source.chunk_id} className="source-item">
               <div>
-                <strong>{source.source_file || "Unknown file"}</strong>
+                {/* Prefer the real uploaded filename from the backend */}
+                <strong>{source.original_filename ?? source.source_file ?? "Unknown file"}</strong>
               </div>
 
               <div>

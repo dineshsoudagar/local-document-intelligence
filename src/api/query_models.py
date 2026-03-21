@@ -42,14 +42,15 @@ class QueryTimingResponse(BaseModel):
 class QuerySourceResponse(BaseModel):
     rank: int
     chunk_id: str
+    doc_id: str | None = None
     source_file: str | None
+    original_filename: str | None = None
     page_start: int | None
     page_end: int | None
     rerank_score: float | None
     fusion_score: float | None
     headings: list[str] | None
     block_type: str | None
-
 
 class QueryResponse(BaseModel):
     query: str
