@@ -10,17 +10,20 @@ body,
 }
 
 body {
-  /* Clean system font stack */
   font-family: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont,
     "Segoe UI", sans-serif;
-  background: #f6f8fb;
+  background:
+    radial-gradient(circle at top left, #dbeafe 0%, transparent 28%),
+    radial-gradient(circle at top right, #fce7f3 0%, transparent 24%),
+    linear-gradient(180deg, #f8fbff 0%, #eef4ff 100%);
   color: #1f2937;
 }
 
 .app-shell {
   display: grid;
-  grid-template-columns: 280px 1fr 320px;
+  grid-template-columns: 280px minmax(0, 1fr) 320px;
   height: 100vh;
+  gap: 0;
 }
 
 /* Base pane styling */
@@ -28,14 +31,24 @@ body {
 .center-pane,
 .right-pane {
   padding: 20px;
-  background: #ffffff;
-  border-right: 1px solid #e5e7eb;
   overflow-y: auto;
 }
 
-/* Slight visual separation for center panel */
+/* Side panes */
+.left-pane,
+.right-pane {
+  background: rgba(255, 255, 255, 0.88);
+  border-right: 1px solid #dbe3ee;
+  backdrop-filter: blur(10px);
+}
+
+/* Main workspace pane */
 .center-pane {
-  background: #f9fbff;
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+  background: linear-gradient(180deg, #f9fbff 0%, #f4f7ff 100%);
+  min-width: 0;
 }
 
 /* Last pane should not have right border */
@@ -50,8 +63,16 @@ h3 {
   color: #111827;
 }
 
+/* Top section of the center pane */
+.center-header {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
 /* Remove default list styling */
-.document-list {
+.document-list,
+.source-list {
   padding: 0;
   margin: 0;
   list-style: none;
@@ -68,114 +89,244 @@ h3 {
   padding: 10px 12px;
   text-align: left;
   border: 1px solid #dbe3ee;
-  border-radius: 10px;
-  background: #f8fafc;
+  border-radius: 12px;
+  background: linear-gradient(180deg, #ffffff 0%, #f8fbff 100%);
   color: #1f2937;
   cursor: pointer;
-  transition: background 0.2s ease, border-color 0.2s ease;
+  transition: transform 0.15s ease, background 0.2s ease, border-color 0.2s ease,
+    box-shadow 0.2s ease;
 }
 
 /* Hover state for document button */
 .document-button:hover {
-  background: #eef4ff;
+  background: linear-gradient(180deg, #eff6ff 0%, #eef2ff 100%);
   border-color: #93c5fd;
+  box-shadow: 0 6px 16px rgba(59, 130, 246, 0.08);
+  transform: translateY(-1px);
 }
 
 /* Selected document button */
 .document-button.selected {
-  background: #dbeafe;
+  background: linear-gradient(180deg, #dbeafe 0%, #bfdbfe 100%);
   border-color: #60a5fa;
+  color: #1e3a8a;
   font-weight: 600;
+  box-shadow: 0 8px 18px rgba(37, 99, 235, 0.12);
 }
 
 /* Toggle row */
 .scope-toggle {
   display: flex;
+  flex-wrap: wrap;
   gap: 8px;
-  margin-bottom: 16px;
 }
 
 /* Scope toggle button */
 .scope-button {
   padding: 9px 14px;
   border: 1px solid #dbe3ee;
-  border-radius: 10px;
+  border-radius: 999px;
   background: #ffffff;
   color: #1f2937;
   cursor: pointer;
-  transition: background 0.2s ease, border-color 0.2s ease;
+  transition: transform 0.15s ease, background 0.2s ease, border-color 0.2s ease,
+    box-shadow 0.2s ease;
 }
 
 /* Hover state for toggle button */
 .scope-button:hover {
   background: #f3f7ff;
   border-color: #93c5fd;
+  box-shadow: 0 4px 12px rgba(59, 130, 246, 0.08);
+  transform: translateY(-1px);
 }
 
 /* Selected toggle button */
 .scope-button.selected {
-  background: #2563eb;
+  background: linear-gradient(135deg, #2563eb 0%, #7c3aed 100%);
   border-color: #2563eb;
   color: #ffffff;
   font-weight: 600;
+  box-shadow: 0 8px 18px rgba(79, 70, 229, 0.18);
+}
+
+/* Status panel below the mode selector */
+.query-meta {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+  padding: 10px 12px;
+  border: 1px solid #dbeafe;
+  border-radius: 12px;
+  background: linear-gradient(180deg, #eff6ff 0%, #f5f3ff 100%);
+  color: #334155;
+  font-size: 14px;
+}
+
+/* Query error styling */
+.query-error {
+  margin: 0;
+  padding: 10px 12px;
+  border: 1px solid #fecaca;
+  border-radius: 12px;
+  background: #fef2f2;
+  color: #b91c1c;
+}
+
+/* Answer container */
+.answer-box {
+  flex: 1;
+  min-height: 260px;
+  padding: 18px;
+  border: 1px solid #dbe3ee;
+  border-radius: 16px;
+  background: linear-gradient(180deg, #ffffff 0%, #f8fbff 100%);
+  box-shadow: 0 8px 24px rgba(15, 23, 42, 0.06);
+  display: flex;
+  flex-direction: column;
+  align-items: stretch;
+}
+
+/* Streamed answer text should stay left-aligned */
+.answer-text {
+  margin: 0;
+  white-space: pre-wrap;
+  text-align: left;
+  line-height: 1.6;
+  color: #0f172a;
+  font-family: inherit;
+}
+
+/* Composer section below the answer box */
+.composer-section {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 14px;
+  border: 1px solid #dbe3ee;
+  border-radius: 16px;
+  background: rgba(255, 255, 255, 0.9);
+  box-shadow: 0 8px 20px rgba(15, 23, 42, 0.05);
+}
+
+/* Small label above the input row */
+.composer-label {
+  font-size: 14px;
+  font-weight: 600;
+  color: #475569;
+}
+
+/* Keep query input and buttons on one row */
+.composer-row {
+  display: flex;
+  gap: 10px;
+  align-items: center;
 }
 
 /* Query input field */
 .query-input {
-  width: 100%;
+  flex: 1;
+  min-width: 0;
   padding: 12px 14px;
-  margin-bottom: 16px;
   border: 1px solid #dbe3ee;
-  border-radius: 10px;
+  border-radius: 12px;
   background: #ffffff;
   color: #111827;
   outline: none;
+  transition: border-color 0.2s ease, box-shadow 0.2s ease;
 }
 
 /* Input focus state */
 .query-input:focus {
   border-color: #3b82f6;
-  box-shadow: 0 0 0 3px rgba(59, 130, 246, 0.12);
+  box-shadow: 0 0 0 4px rgba(59, 130, 246, 0.12);
 }
 
-/* Submit button */
+/* Shared button base */
 .submit-button {
-  padding: 10px 14px;
-  margin-bottom: 16px;
+  padding: 12px 16px;
   border: none;
-  border-radius: 10px;
-  background: #16a34a;
+  border-radius: 12px;
   color: #ffffff;
   font-weight: 600;
   cursor: pointer;
-  transition: background 0.2s ease;
+  transition: transform 0.15s ease, opacity 0.2s ease, box-shadow 0.2s ease;
+  white-space: nowrap;
 }
 
-/* Submit button hover state */
-.submit-button:hover {
-  background: #15803d;
+/* Hover movement for active buttons */
+.submit-button:hover:not(:disabled) {
+  transform: translateY(-1px);
 }
 
-/* Answer container */
-.answer-box {
-  margin-top: 16px;
-  padding: 14px;
-  border: 1px solid #dbe3ee;
-  border-radius: 12px;
-  background: #ffffff;
-  box-shadow: 0 1px 2px rgba(15, 23, 42, 0.04);
+/* Disabled state */
+.submit-button:disabled {
+  opacity: 0.55;
+  cursor: not-allowed;
+  transform: none;
+  box-shadow: none;
 }
 
-.source-list {
-  padding: 0;
-  margin: 0;
-  list-style: none;
+/* Ask button color */
+.ask-button {
+  background: linear-gradient(135deg, #16a34a 0%, #22c55e 100%);
+  box-shadow: 0 8px 18px rgba(34, 197, 94, 0.18);
 }
 
+/* Ask button hover state */
+.ask-button:hover:not(:disabled) {
+  box-shadow: 0 10px 22px rgba(34, 197, 94, 0.24);
+}
+
+/* Stop button color */
+.stop-button {
+  background: linear-gradient(135deg, #ef4444 0%, #f97316 100%);
+  box-shadow: 0 8px 18px rgba(239, 68, 68, 0.18);
+}
+
+/* Stop button hover state */
+.stop-button:hover:not(:disabled) {
+  box-shadow: 0 10px 22px rgba(239, 68, 68, 0.24);
+}
+
+/* Evidence items */
 .source-item {
   margin-bottom: 12px;
   padding: 12px;
   border: 1px solid #dbe3ee;
-  border-radius: 10px;
-  background: #f8fafc;
+  border-radius: 12px;
+  background: linear-gradient(180deg, #ffffff 0%, #f8fafc 100%);
+  box-shadow: 0 4px 12px rgba(15, 23, 42, 0.04);
+}
+
+/* Responsive fallback for smaller screens */
+@media (max-width: 1100px) {
+  .app-shell {
+    grid-template-columns: 240px 1fr;
+  }
+
+  .right-pane {
+    display: none;
+  }
+}
+
+@media (max-width: 760px) {
+  .app-shell {
+    grid-template-columns: 1fr;
+    height: auto;
+  }
+
+  .left-pane {
+    border-right: none;
+    border-bottom: 1px solid #dbe3ee;
+  }
+
+  .composer-row {
+    flex-direction: column;
+    align-items: stretch;
+  }
+
+  .submit-button {
+    width: 100%;
+  }
 }

@@ -15,3 +15,7 @@ useful links : https://docling-project.github.io/docling/examples/pictures_descr
 - CPU-latency fallback
 - keep the same embedder
 - replace reranker with BAAI/bge-reranker-v2-m3 if needed
+
+
+
+# Fix two chunkers with docling

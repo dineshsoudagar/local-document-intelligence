@@ -7,8 +7,12 @@ from collections.abc import Iterator
 from fastapi import APIRouter, Depends, HTTPException, status
 from fastapi.responses import StreamingResponse
 
-from src.api.app_state import get_answer_service_from_state
+from src.api.app_state import (
+    get_answer_service_from_state,
+    get_document_registry_from_state,
+)
 from src.api.query_models import QueryRequest, QueryResponse
+from src.app.document_registry import DocumentRegistry
 from src.generation.answer_service import GroundedAnswerService
 
 router = APIRouter()
@@ -18,10 +22,40 @@ def _event_line(event_type: str, data: object) -> bytes:
     return (json.dumps({"type": event_type, "data": data}, ensure_ascii=False) + "\n").encode("utf-8")
 
 
+def _attach_original_filenames(
+    sources: list[dict[str, object]],
+    registry: DocumentRegistry,
+) -> list[dict[str, object]]:
+    # Cache document lookups so repeated chunks from the same document do not hit SQLite repeatedly
+    original_filename_by_doc_id: dict[str, str | None] = {}
+
+    for source in sources:
+        doc_id_value = source.get("doc_id")
+        doc_id = str(doc_id_value) if doc_id_value else None
+
+        # Sources without doc_id cannot be joined to the registry
+        if not doc_id:
+            source["original_filename"] = None
+            continue
+
+        # Load the uploaded filename once per document id
+        if doc_id not in original_filename_by_doc_id:
+            record = registry.get_document(doc_id)
+            original_filename_by_doc_id[doc_id] = (
+                record.original_filename if record is not None else None
+            )
+
+        # Attach the real uploaded filename for frontend display
+        source["original_filename"] = original_filename_by_doc_id[doc_id]
+
+    return sources
+
+
 @router.post("/query", response_model=QueryResponse)
 def query_documents(
     request: QueryRequest,
     answer_service: GroundedAnswerService = Depends(get_answer_service_from_state),
+    registry: DocumentRegistry = Depends(get_document_registry_from_state),
 ) -> QueryResponse:
     try:
         result = answer_service.answer(
@@ -40,13 +74,20 @@ def query_documents(
             detail=f"Query failed: {exc}",
         ) from exc
 
-    return QueryResponse.model_validate(result.to_dict())
+    # Convert the answer result into a mutable payload
+    payload = result.to_dict()
+
+    # Replace managed storage names with the real uploaded filenames when possible
+    payload["sources"] = _attach_original_filenames(payload["sources"], registry)
+
+    return QueryResponse.model_validate(payload)
 
 
 @router.post("/query/stream")
 def stream_query_documents(
     request: QueryRequest,
     answer_service: GroundedAnswerService = Depends(get_answer_service_from_state),
+    registry: DocumentRegistry = Depends(get_document_registry_from_state),
 ) -> StreamingResponse:
     # Build the retrieval + generation stream before starting the HTTP response
     try:
@@ -72,14 +113,20 @@ def stream_query_documents(
 
     # This generator produces the NDJSON response line by line
     def body() -> Iterator[bytes]:
-        # Collect streamed chunks so the final event can include the full answer
+        # Collect streamed text so the final event can include the full answer
         answer_parts: list[str] = []
 
         # Measure generation time separately from retrieval time
         generation_started_at = time.perf_counter()
 
+        # Convert the stream start payload into a mutable dictionary
+        start_data = start_payload.to_dict()
+
+        # Replace managed storage names with the real uploaded filenames when possible
+        start_data["sources"] = _attach_original_filenames(start_data["sources"], registry)
+
         # Send initial metadata before token streaming starts
-        yield _event_line("start", start_payload.to_dict())
+        yield _event_line("start", start_data)
 
         try:
             # Stream each generated text piece from the answer service
