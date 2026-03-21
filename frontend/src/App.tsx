@@ -46,6 +46,31 @@ type QueryResponse = {
   sources: QuerySource[];
 };
 
+type QueryStreamStart = {
+  query: string;
+  mode_used: string;
+  fallback_reason: string | null;
+  sources: QuerySource[];
+  used_context_tokens: number;
+  retrieved_chunk_count: number;
+  retrieval_seconds: number;
+};
+
+type QueryStreamDone = {
+  answer: string;
+  timings: {
+    retrieval_seconds: number;
+    generation_seconds: number;
+    total_seconds: number;
+  };
+};
+
+type QueryStreamEvent =
+  | { type: "start"; data: QueryStreamStart }
+  | { type: "token"; data: { text: string } }
+  | { type: "done"; data: QueryStreamDone }
+  | { type: "error"; data: { message: string } };
+
 export default function App() {
   // Stores all documents loaded from the backend
   const [documents, setDocuments] = useState<DocumentItem[]>([]);
@@ -107,199 +132,277 @@ export default function App() {
     loadDocuments();
   }, []);
 
-  // Sends the current query to the backend
+  // Sends the current query to the backend and streams the answer incrementally
   async function handleSubmit() {
-    // Basic guard: do nothing for empty input
-    if (!queryText.trim()) {
-      return;
+      // Basic guard: do nothing for empty input
+      if (!queryText.trim()) {
+        return;
+      }
+
+      // Single-document mode requires one selected document
+      if (uiMode === "document" && !selectedDocId) {
+        setQueryError("Select a document first.");
+        return;
+      }
+
+      // Clear old request state before sending a new query
+      setQueryError(null);
+      setAnswer("");
+      setSources([]);
+      setIsSubmitting(true);
+
+      try {
+        // Default backend mode for corpus and single-document queries
+        let backendMode: BackendQueryMode = "grounded";
+
+        if (uiMode === "chat") {
+          backendMode = "chat";
+        } else if (uiMode === "auto") {
+          backendMode = "auto";
+        }
+
+        // Add doc_ids only for modes that should use the selected document
+        let docIds: string[] | undefined = undefined;
+
+        if ((uiMode === "document" || uiMode === "auto") && selectedDocId) {
+          docIds = [selectedDocId];
+        }
+
+        // Build request body for FastAPI
+        const payload: QueryRequestPayload = {
+          query: queryText,
+          mode: backendMode,
+          ...(docIds ? { doc_ids: docIds } : {}),
+        };
+
+        // Send POST /query/stream to the backend
+        const response = await fetch("http://localhost:8000/query/stream", {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+          },
+          body: JSON.stringify(payload),
+        });
+
+        // Stop on backend error response
+        if (!response.ok) {
+          throw new Error(`Query failed: ${response.status}`);
+        }
+
+        // Streaming requires a readable response body
+        if (!response.body) {
+          throw new Error("Streaming response body is missing.");
+        }
+
+        // Read the response as a byte stream
+        const reader = response.body.getReader();
+        const decoder = new TextDecoder();
+
+        // Buffer keeps incomplete lines between chunks
+        let buffer = "";
+
+        while (true) {
+          // Read the next chunk from the stream
+          const { value, done } = await reader.read();
+
+          // Exit once the backend closes the stream
+          if (done) {
+            break;
+          }
+
+          // Decode bytes into text and append to the buffer
+          buffer += decoder.decode(value, { stream: true });
+
+          // Split complete NDJSON lines and keep the unfinished tail
+          const lines = buffer.split("\n");
+          buffer = lines.pop() ?? "";
+
+          for (const line of lines) {
+            const trimmed = line.trim();
+
+            // Ignore empty lines
+            if (!trimmed) {
+              continue;
+            }
+
+            // Parse one streamed event from the backend
+            const event: QueryStreamEvent = JSON.parse(trimmed);
+
+            // Initial metadata event with sources and retrieval info
+            if (event.type === "start") {
+              setSources(event.data.sources);
+              continue;
+            }
+
+            // Append the next streamed token chunk to the answer
+            if (event.type === "token") {
+              setAnswer((current) => current + event.data.text);
+              continue;
+            }
+
+            // Surface backend-side streaming errors
+            if (event.type === "error") {
+              setQueryError(event.data.message);
+              continue;
+            }
+
+            // Final event with the completed answer and timing info
+            if (event.type === "done") {
+              setAnswer(event.data.answer);
+            }
+          }
+        }
+
+        // Process any last buffered line after the stream ends
+        const trailing = buffer.trim();
+
+        if (trailing) {
+          const event: QueryStreamEvent = JSON.parse(trailing);
+
+          if (event.type === "start") {
+            setSources(event.data.sources);
+          } else if (event.type === "token") {
+            setAnswer((current) => current + event.data.text);
+          } else if (event.type === "error") {
+            setQueryError(event.data.message);
+          } else if (event.type === "done") {
+            setAnswer(event.data.answer);
+          }
+        }
+      } catch (err) {
+        // Save a readable error message
+        if (err instanceof Error) {
+          setQueryError(err.message);
+        } else {
+          setQueryError("Failed to run query");
+        }
+      } finally {
+        // Always stop loading state
+        setIsSubmitting(false);
+      }
     }
 
-    // Single-document mode requires one selected document
-    if (uiMode === "document" && !selectedDocId) {
-      setQueryError("Select a document first.");
-      return;
-    }
+return (
+  <div className="app-shell">
+    <aside className="left-pane">
+      <h2>Documents</h2>
 
-    // Clear old request state before sending a new query
-    setQueryError(null);
-    setSources([]);
-    setIsSubmitting(true);
+      {/* Show error only if one exists */}
+      {error && <p>{error}</p>}
 
-    try {
-      // Default backend mode for corpus and single-document queries
-      let backendMode: BackendQueryMode = "grounded";
+      <ul className="document-list">
+        {documents.map((document) => (
+          <li key={document.doc_id}>
+            <button
+              type="button"
+              className={
+                document.doc_id === selectedDocId
+                  ? "document-button selected"
+                  : "document-button"
+              }
+              onClick={() => setSelectedDocId(document.doc_id)}
+            >
+              {document.original_filename}
+            </button>
+          </li>
+        ))}
+      </ul>
+    </aside>
 
-      if (uiMode === "chat") {
-        backendMode = "chat";
-      } else if (uiMode === "auto") {
-        backendMode = "auto";
-      }
+    <main className="center-pane">
+      <h2>Query Workspace</h2>
 
-      // Add doc_ids only for modes that should use the selected document
-      let docIds: string[] | undefined = undefined;
-
-      if ((uiMode === "document" || uiMode === "auto") && selectedDocId) {
-        docIds = [selectedDocId];
-      }
-
-      // Build request body for FastAPI
-      const payload: QueryRequestPayload = {
-        query: queryText,
-        mode: backendMode,
-        ...(docIds ? { doc_ids: docIds } : {}),
-      };
-
-      // Send POST /query to the backend
-      const response = await fetch("http://localhost:8000/query", {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-        },
-        body: JSON.stringify(payload),
-      });
-
-      // Stop on backend error response
-      if (!response.ok) {
-        throw new Error(`Query failed: ${response.status}`);
-      }
-
-      // Read JSON answer
-      const data: QueryResponse = await response.json();
-
-      // Save answer and retrieved sources into state
-      setAnswer(data.answer);
-      setSources(data.sources);
-
-    } catch (err) {
-      // Save a readable error message
-      if (err instanceof Error) {
-        setQueryError(err.message);
-      } else {
-        setQueryError("Failed to run query");
-      }
-    } finally {
-      // Always stop loading state
-      setIsSubmitting(false);
-    }
-  }
-
-  return (
-    <div className="app-shell">
-      <aside className="left-pane">
-        <h2>Documents</h2>
-
-        {/* Show error only if one exists */}
-        {error && <p>{error}</p>}
-
-        <ul className="document-list">
-                    {documents.map((document) => (
-            <li key={document.doc_id}>
-              <button
-                type="button"
-                className={
-                  document.doc_id === selectedDocId
-                    ? "document-button selected"
-                    : "document-button"
-                }
-                onClick={() => setSelectedDocId(document.doc_id)}
-              >
-                {document.original_filename}
-              </button>
-            </li>
-          ))}
-        </ul>
-      </aside>
-
-      <main className="center-pane">
-        <h2>Query Workspace</h2>
-
-        {/* Single user-facing mode selector */}
-        <div className="scope-toggle">
-          <button
-            type="button"
-            className={uiMode === "corpus" ? "scope-button selected" : "scope-button"}
-            onClick={() => setUiMode("corpus")}
-          >
-            Corpus
-          </button>
-
-          <button
-            type="button"
-            className={uiMode === "document" ? "scope-button selected" : "scope-button"}
-            onClick={() => setUiMode("document")}
-          >
-            Single Document
-          </button>
-
-          <button
-            type="button"
-            className={uiMode === "chat" ? "scope-button selected" : "scope-button"}
-            onClick={() => setUiMode("chat")}
-          >
-            Chat
-          </button>
-
-          <button
-            type="button"
-            className={uiMode === "auto" ? "scope-button selected" : "scope-button"}
-            onClick={() => setUiMode("auto")}
-          >
-            Auto
-          </button>
-        </div>
-
-        {/* Controlled input: value comes from state, typing updates state */}
-        <input
-          type="text"
-          className="query-input"
-          placeholder="Ask a question about your documents"
-          value={queryText}
-          onChange={(event) => setQueryText(event.target.value)}
-        />
-
-        {/* Sends the current query to the backend */}
-        <button type="button" className="submit-button" onClick={handleSubmit}>
-          {isSubmitting ? "Running..." : "Ask"}
+      {/* Single user-facing mode selector */}
+      <div className="scope-toggle">
+        <button
+          type="button"
+          className={uiMode === "corpus" ? "scope-button selected" : "scope-button"}
+          onClick={() => setUiMode("corpus")}
+        >
+          Corpus
         </button>
 
-        {/* Show query error only if one exists */}
-        {queryError && <p>{queryError}</p>}
+        <button
+          type="button"
+          className={uiMode === "document" ? "scope-button selected" : "scope-button"}
+          onClick={() => setUiMode("document")}
+        >
+          Single Document
+        </button>
 
-        {/* Show backend answer */}
-        <div className="answer-box">
-          <h3>Answer</h3>
-          <p>{answer || "No answer yet"}</p>
-        </div>
-      </main>
+        <button
+          type="button"
+          className={uiMode === "chat" ? "scope-button selected" : "scope-button"}
+          onClick={() => setUiMode("chat")}
+        >
+          Chat
+        </button>
 
-            <aside className="right-pane">
-        <h2>Evidence</h2>
+        <button
+          type="button"
+          className={uiMode === "auto" ? "scope-button selected" : "scope-button"}
+          onClick={() => setUiMode("auto")}
+        >
+          Auto
+        </button>
+      </div>
 
-        {/* Show a placeholder when no evidence is available */}
-        {sortedSources.length === 0 && <p>No evidence yet</p>}
+      {/* Controlled input: value comes from state, typing updates state */}
+      <input
+        type="text"
+        className="query-input"
+        placeholder="Ask a question about your documents"
+        value={queryText}
+        onChange={(event) => setQueryText(event.target.value)}
+      />
 
-        <ul className="source-list">
-          {sortedSources.map((source) => (
-            <li key={source.chunk_id} className="source-item">
-              <div>
-                {/* Prefer the real uploaded filename from the backend */}
-                <strong>{source.original_filename ?? source.source_file ?? "Unknown file"}</strong>
-              </div>
+      {/* Sends the current query to the backend */}
+      <button type="button" className="submit-button" onClick={handleSubmit}>
+        {isSubmitting ? "Running..." : "Ask"}
+      </button>
 
-              <div>
-                Pages: {source.page_start ?? "-"} - {source.page_end ?? "-"}
-              </div>
+      {/* Show query error only if one exists */}
+      {queryError && <p>{queryError}</p>}
 
-              <div>
-                Headings:{" "}
-                {source.headings && source.headings.length > 0
-                  ? source.headings.join(" > ")
-                  : "-"}
-              </div>
-            </li>
-          ))}
-        </ul>
-      </aside>
-    </div>
-  );
+      {/* Show backend answer */}
+      <div className="answer-box">
+        <h3>Answer</h3>
+        <pre style={{ whiteSpace: "pre-wrap", margin: 0 }}>
+          {answer || "No answer yet"}
+        </pre>
+      </div>
+    </main>
+
+    <aside className="right-pane">
+      <h2>Evidence</h2>
+
+      {/* Show a placeholder when no evidence is available */}
+      {sortedSources.length === 0 && <p>No evidence yet</p>}
+
+      <ul className="source-list">
+        {sortedSources.map((source) => (
+          <li key={source.chunk_id} className="source-item">
+            <div>
+              {/* Prefer the real uploaded filename from the backend */}
+              <strong>
+                {source.original_filename ?? source.source_file ?? "Unknown file"}
+              </strong>
+            </div>
+
+            <div>
+              Pages: {source.page_start ?? "-"} - {source.page_end ?? "-"}
+            </div>
+
+            <div>
+              Headings:{" "}
+              {source.headings && source.headings.length > 0
+                ? source.headings.join(" > ")
+                : "-"}
+            </div>
+          </li>
+        ))}
+      </ul>
+    </aside>
+  </div>
+);
 }
