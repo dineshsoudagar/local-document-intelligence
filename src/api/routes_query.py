@@ -1,13 +1,8 @@
-from __future__ import annotations
-
-import json
-import time
-from collections.abc import Iterator
-from pathlib import Path
+from typing import cast
 
 from fastapi import APIRouter, Depends, HTTPException, status
 from fastapi.responses import StreamingResponse
-
+import json
 from src.api.app_state import (
     get_answer_service_from_state,
     get_document_registry_from_state,
@@ -16,6 +11,10 @@ from src.api.query_models import QueryRequest, QueryResponse
 from src.app.document_registry import DocumentRegistry
 from src.generation.answer_service import GroundedAnswerService
 
+import json
+import time
+from collections.abc import Iterator
+from pathlib import Path
 router = APIRouter()
 
 
@@ -65,8 +64,8 @@ def _expand_pages(source: dict[str, object]) -> list[int]:
         page_end_value = page_start_value
 
     try:
-        page_start = int(page_start_value)
-        page_end = int(page_end_value)
+        page_start = int(str(page_start_value))
+        page_end = int(str(page_end_value))
     except (TypeError, ValueError):
         return []
 
@@ -99,7 +98,7 @@ def _collapse_sources_to_references(
             }
 
         reference = references_by_key[reference_key]
-        reference["pages"].update(_expand_pages(source))
+        cast(set[int], reference["pages"]).update(_expand_pages(source))
 
     collapsed_references: list[dict[str, object]] = []
     for reference in references_by_key.values():
@@ -107,14 +106,14 @@ def _collapse_sources_to_references(
             {
                 "doc_id": reference["doc_id"],
                 "original_filename": reference["original_filename"],
-                "pages": sorted(reference["pages"]),
+                "pages": sorted(cast(set[int], reference["pages"])),
                 "order": reference["order"],
             }
         )
 
     collapsed_references.sort(
         key=lambda reference: (
-            int(reference["order"]),
+            cast(int, reference["order"]),
             str(reference["original_filename"] or ""),
         )
     )
