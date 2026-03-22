@@ -88,7 +88,7 @@ class GroundedAnswerResult:
 
 
 class GroundedAnswerService:
-    """Coordinate retrieval, context construction, and answer generation."""
+    """Coordinate retrieval, context assembly, and answer generation."""
 
     def __init__(
             self,
@@ -106,14 +106,14 @@ class GroundedAnswerService:
 
     @property
     def generator(self) -> LocalQwenGenerator:
-        """Return a lazily initialized local generator."""
+        """Return the lazily initialized generator instance."""
         if self._generator is None:
             self._generator = LocalQwenGenerator(self._config.generator_model_path)
         return self._generator
 
     def answer(self, query: str, *, mode: str = "grounded",
                doc_ids: list[str] | None = None, ) -> GroundedAnswerResult:
-        """Return a buffered answer for grounded, chat, or auto mode."""
+        """Generate a buffered response."""
         self._validate_mode(mode)
         overall_started_at = time.perf_counter()
 
@@ -194,7 +194,7 @@ class GroundedAnswerService:
 
     def stream(self, query: str, *, mode: str = "grounded",
                doc_ids: list[str] | None = None, ) -> tuple[StreamStartPayload, Iterator[str]]:
-        """Return response metadata and a streamed answer iterator."""
+        """Generate response metadata and a streamed answer iterator."""
         self._validate_mode(mode)
 
         if mode == "chat":
@@ -253,7 +253,7 @@ class GroundedAnswerService:
     def _build_stream_response(self, *, query: str, mode_used: str, context: GroundedContext,
                                retrieved_chunk_count: int, retrieval_seconds: float,
                                fallback_reason: str | None, ) -> tuple[StreamStartPayload, Iterator[str]]:
-        """Build stream metadata and the corresponding text iterator."""
+        """Package stream metadata with the corresponding text iterator."""
         start_payload = StreamStartPayload(
             query=query,
             mode_used=mode_used,
@@ -276,7 +276,7 @@ class GroundedAnswerService:
             *,
             doc_ids: list[str] | None = None,
     ) -> tuple[list[RetrievedChunk], float]:
-        """Run planner-aware retrieval for the supplied query."""
+        """Execute planner-driven retrieval and record its duration."""
         started_at = time.perf_counter()
 
         retrieved_chunks = self._planner.retrieve(
@@ -292,7 +292,7 @@ class GroundedAnswerService:
             self,
             retrieved_chunks: Sequence[RetrievedChunk],
     ) -> GroundedContext:
-        """Build prompt context from retrieved evidence."""
+        """Assemble grounded prompt context from retrieved chunks."""
         return build_grounded_context(
             self.generator,
             retrieved_chunks,
@@ -307,7 +307,7 @@ class GroundedAnswerService:
             mode: str,
             context_text: str | None,
     ) -> tuple[str, float]:
-        """Generate one full answer string."""
+        """Generate a complete response string."""
         system_prompt, answer_instruction = self._prompts_for_mode(mode)
 
         started_at = time.perf_counter()
@@ -331,7 +331,7 @@ class GroundedAnswerService:
             mode: str,
             context_text: str | None,
     ) -> Iterator[str]:
-        """Stream answer text incrementally."""
+        """Stream response text from the assembled prompt."""
         system_prompt, answer_instruction = self._prompts_for_mode(mode)
 
         prompt = self.generator.build_prompt(
@@ -353,7 +353,7 @@ class GroundedAnswerService:
             requested_mode: str,
             retrieved_chunks: Sequence[RetrievedChunk],
     ) -> tuple[str, str | None]:
-        """Resolve auto mode into grounded or chat."""
+        """Resolve the effective generation mode."""
         if requested_mode == "grounded":
             return "grounded", None
         if requested_mode == "chat":
@@ -389,7 +389,7 @@ class GroundedAnswerService:
             mode_used: str,
             fallback_reason: str | None = None,
     ) -> GroundedAnswerResult:
-        """Create a structured query result with timings."""
+        """Create the response payload with timing data."""
         timings = AnswerTimings(
             retrieval_seconds=retrieval_seconds,
             generation_seconds=generation_seconds,
@@ -409,7 +409,7 @@ class GroundedAnswerService:
             self,
             retrieved_chunks: Sequence[RetrievedChunk],
     ) -> tuple[bool, str | None]:
-        """Decide whether retrieval is strong enough for grounded answering."""
+        """Return whether retrieval quality is sufficient for grounded generation."""
         if not retrieved_chunks:
             return False, "no_retrieval_hits"
 
@@ -424,21 +424,21 @@ class GroundedAnswerService:
 
     @staticmethod
     def _empty_context() -> GroundedContext:
-        """Return an empty context for non-grounded responses."""
+        """Return the empty context used for non-grounded responses."""
         return GroundedContext(text="", sources=[], used_tokens=0)
 
     @staticmethod
     def _empty_text_stream() -> Iterator[str]:
-        """Return a one-message stream for empty retrieval results."""
+        """Yield the default message for empty retrieval results."""
         yield "No relevant chunks were retrieved."
 
     @staticmethod
     def _validate_mode(mode: str) -> None:
-        """Validate the public query mode."""
+        """Validate the requested query mode."""
         if mode not in {"grounded", "chat", "auto"}:
             raise ValueError(f"Unsupported mode: {mode}")
 
     @staticmethod
     def sources_to_dicts(sources: Sequence[AnswerSource]) -> list[dict[str, Any]]:
-        """Convert answer sources into JSON-friendly dictionaries."""
+        """Convert answer sources to JSON-serializable dictionaries."""
         return [source.to_dict() for source in sources]
