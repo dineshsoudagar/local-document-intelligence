@@ -5,6 +5,7 @@ import { DocumentsPane } from "./components/DocumentsPane";
 import { EvidencePane } from "./components/EvidencePane";
 import { QueryPane } from "./components/QueryPane";
 import type {
+  ChatMessage,
   BackendQueryMode,
   DocumentItem,
   QueryRequestPayload,
@@ -20,7 +21,7 @@ export default function App() {
   const [selectedDocId, setSelectedDocId] = useState<string | null>(null);
   const [uiMode, setUiMode] = useState<UiQueryMode>("corpus");
   const [queryText, setQueryText] = useState("");
-  const [answer, setAnswer] = useState("");
+  const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [sources, setSources] = useState<QuerySource[]>([]);
   const [queryError, setQueryError] = useState<string | null>(null);
   const [isSubmitting, setIsSubmitting] = useState(false);
@@ -32,6 +33,21 @@ export default function App() {
   const [resolvedMode, setResolvedMode] = useState<string | null>(null);
   const [fallbackReason, setFallbackReason] = useState<string | null>(null);
   const abortControllerRef = useRef<AbortController | null>(null);
+
+  function updateMessage(
+    messageId: string,
+    updater: (message: ChatMessage) => ChatMessage,
+  ) {
+    setMessages((current) =>
+      current.map((message) =>
+        message.id === messageId ? updater(message) : message,
+      ),
+    );
+  }
+
+  function createMessageId(prefix: "user" | "assistant") {
+    return `${prefix}-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+  }
 
   // Pull the latest uploaded documents from the backend so the left pane stays in sync.
   async function loadDocuments() {
@@ -81,7 +97,9 @@ export default function App() {
 
   async function handleSubmit() {
     // Ignore empty submissions so the backend is only called with real input.
-    if (!queryText.trim()) {
+    const trimmedQuery = queryText.trim();
+
+    if (!trimmedQuery) {
       return;
     }
 
@@ -95,14 +113,31 @@ export default function App() {
     abortControllerRef.current?.abort();
     const controller = new AbortController();
     abortControllerRef.current = controller;
+    const userMessageId = createMessageId("user");
+    const assistantMessageId = createMessageId("assistant");
 
     setQueryError(null);
-    setAnswer("");
     setSources([]);
     setResolvedMode(null);
     setFallbackReason(null);
     setIsSubmitting(true);
     setQueryStatus("retrieving");
+    setQueryText("");
+    setMessages((current) => [
+      ...current,
+      {
+        id: userMessageId,
+        role: "user",
+        content: trimmedQuery,
+        status: "complete",
+      },
+      {
+        id: assistantMessageId,
+        role: "assistant",
+        content: "",
+        status: "streaming",
+      },
+    ]);
 
     try {
       // Translate the UI-specific mode labels into the backend API contract.
@@ -123,7 +158,7 @@ export default function App() {
 
       // Build the request payload and include doc_ids only when a document filter exists.
       const payload: QueryRequestPayload = {
-        query: queryText,
+        query: trimmedQuery,
         mode: backendMode,
         ...(docIds ? { doc_ids: docIds } : {}),
       };
@@ -138,32 +173,56 @@ export default function App() {
         },
         onToken: (text) => {
           // Append streamed tokens so the answer appears progressively.
-          setAnswer((current) => current + text);
+          updateMessage(assistantMessageId, (message) => ({
+            ...message,
+            content: message.content + text,
+            status: "streaming",
+          }));
         },
         onDone: (data) => {
           // Replace the streamed draft with the backend's final answer snapshot.
-          setAnswer(data.answer);
+          updateMessage(assistantMessageId, (message) => ({
+            ...message,
+            content: data.answer,
+            status: "complete",
+          }));
           setQueryStatus("idle");
         },
       });
     } catch (err) {
       // User-triggered cancellation is an expected path, not an error state.
       if (err instanceof DOMException && err.name === "AbortError") {
+        updateMessage(assistantMessageId, (message) => ({
+          ...message,
+          content: message.content || "Response stopped.",
+          status: "complete",
+        }));
         setQueryStatus("idle");
         return;
       }
 
       // Surface backend or network failures inside the query pane.
+      const message = err instanceof Error ? err.message : "Failed to run query";
+
       if (err instanceof Error) {
         setQueryError(err.message);
       } else {
         setQueryError("Failed to run query");
       }
 
+      updateMessage(assistantMessageId, (chatMessage) => ({
+        ...chatMessage,
+        content:
+          chatMessage.content ||
+          `I couldn't complete that request.\n\n${message}`,
+        status: "error",
+      }));
       setQueryStatus("error");
     } finally {
       // Release the controller so the next query starts from a clean state.
-      abortControllerRef.current = null;
+      if (abortControllerRef.current === controller) {
+        abortControllerRef.current = null;
+      }
       setIsSubmitting(false);
     }
   }
@@ -248,12 +307,12 @@ export default function App() {
 
       {/* Center pane owns query input, answer display, and query status messaging. */}
       <QueryPane
+        messages={messages}
         uiMode={uiMode}
         queryStatus={queryStatus}
         resolvedMode={resolvedMode}
         fallbackReason={fallbackReason}
         queryError={queryError}
-        answer={answer}
         queryText={queryText}
         isSubmitting={isSubmitting}
         onModeChange={setUiMode}
@@ -263,7 +322,7 @@ export default function App() {
       />
 
       {/* Right pane shows the retrieved evidence chunks that supported the answer. */}
-      <EvidencePane sources={sources} />
+      <EvidencePane sources={sources} documents={documents} />
     </div>
   );
 }

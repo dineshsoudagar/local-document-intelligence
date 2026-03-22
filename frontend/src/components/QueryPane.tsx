@@ -1,12 +1,14 @@
+import { useEffect, useRef } from "react";
 import type { QueryStatus, UiQueryMode } from "../types";
+import type { ChatMessage } from "../types";
 
 type QueryPaneProps = {
+  messages: ChatMessage[];
   uiMode: UiQueryMode;
   queryStatus: QueryStatus;
   resolvedMode: string | null;
   fallbackReason: string | null;
   queryError: string | null;
-  answer: string;
   queryText: string;
   isSubmitting: boolean;
   onModeChange: (mode: UiQueryMode) => void;
@@ -16,12 +18,12 @@ type QueryPaneProps = {
 };
 
 export function QueryPane({
+  messages,
   uiMode,
   queryStatus,
   resolvedMode,
   fallbackReason,
   queryError,
-  answer,
   queryText,
   isSubmitting,
   onModeChange,
@@ -29,10 +31,19 @@ export function QueryPane({
   onSubmit,
   onStop,
 }: QueryPaneProps) {
+  const transcriptEndRef = useRef<HTMLDivElement | null>(null);
+
+  useEffect(() => {
+    transcriptEndRef.current?.scrollIntoView({ behavior: "smooth", block: "end" });
+  }, [messages, queryStatus]);
+
   return (
     <main className="center-pane">
       <div className="center-header">
-        <h2>Query Workspace</h2>
+        <div className="center-header-copy">
+          <h2>Chat Workspace</h2>
+          <p>Ask questions about your uploaded documents and review the responses below.</p>
+        </div>
 
         {/* These buttons switch how the backend should interpret the query. */}
         <div className="scope-toggle">
@@ -81,28 +92,61 @@ export function QueryPane({
         {queryError && <p className="query-error">{queryError}</p>}
       </div>
 
-      {/* The answer box shows either the streamed response or a placeholder before the first query. */}
-      <div className="answer-box">
-        <h3>Answer</h3>
-        <pre className="answer-text">{answer || "No answer yet"}</pre>
+      <div className="chat-window">
+        {messages.length === 0 ? (
+          <div className="chat-empty-state">
+            <h3>Start a conversation</h3>
+            <p>Send a message to see the chat transcript appear here.</p>
+          </div>
+        ) : (
+          <div className="chat-transcript" aria-live="polite">
+            {messages.map((message) => (
+              <div
+                key={message.id}
+                className={
+                  message.role === "user"
+                    ? "chat-row chat-row-user"
+                    : "chat-row chat-row-assistant"
+                }
+              >
+                <div
+                  className={
+                    message.role === "user"
+                      ? "chat-bubble chat-bubble-user"
+                      : "chat-bubble chat-bubble-assistant"
+                  }
+                >
+                  <div className="chat-bubble-label">
+                    {message.role === "user" ? "You" : "Assistant"}
+                  </div>
+                  <div className="chat-bubble-text">
+                    {message.content || (message.status === "streaming" ? "Thinking..." : "")}
+                  </div>
+                </div>
+              </div>
+            ))}
+            <div ref={transcriptEndRef} />
+          </div>
+        )}
       </div>
 
       <div className="composer-section">
         <label className="composer-label" htmlFor="query-input">
-          Query
+          Message
         </label>
 
         <div className="composer-row">
-          <input
+          <textarea
             id="query-input"
-            type="text"
             className="query-input"
             placeholder="Ask a question about your documents"
             value={queryText}
+            rows={3}
             onChange={(event) => onQueryTextChange(event.target.value)}
             onKeyDown={(event) => {
-              // Pressing Enter triggers the same submit path as the Ask button.
-              if (event.key === "Enter" && !isSubmitting) {
+              // Enter sends the message; Shift+Enter inserts a newline.
+              if (event.key === "Enter" && !event.shiftKey && !isSubmitting) {
+                event.preventDefault();
                 onSubmit();
               }
             }}

@@ -28,6 +28,14 @@ export type UiQueryMode = "corpus" | "document" | "chat" | "auto";
 // Query modes accepted by the backend API.
 export type BackendQueryMode = "grounded" | "chat" | "auto";
 
+// One rendered chat message in the frontend transcript.
+export type ChatMessage = {
+  id: string;
+  role: "user" | "assistant";
+  content: string;
+  status: "streaming" | "complete" | "error";
+};
+
 // Payload sent when starting a new query request.
 export type QueryRequestPayload = {
   query: string;
@@ -37,17 +45,9 @@ export type QueryRequestPayload = {
 
 // One retrieved evidence chunk returned by the backend for grounding.
 export type QuerySource = {
-  rank: number;
-  chunk_id: string;
   doc_id?: string | null;
-  source_file: string | null;
   original_filename?: string | null;
-  page_start: number | null;
-  page_end: number | null;
-  rerank_score: number | null;
-  fusion_score: number | null;
-  headings: string[] | null;
-  block_type: string | null;
+  pages: number[];
 };
 
 // First streaming event: metadata about retrieval before answer tokens begin.

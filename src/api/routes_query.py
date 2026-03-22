@@ -3,6 +3,7 @@ from __future__ import annotations
 import json
 import time
 from collections.abc import Iterator
+from pathlib import Path
 
 from fastapi import APIRouter, Depends, HTTPException, status
 from fastapi.responses import StreamingResponse
@@ -30,8 +31,7 @@ def _attach_original_filenames(
     original_filename_by_doc_id: dict[str, str | None] = {}
 
     for source in sources:
-        doc_id_value = source.get("doc_id")
-        doc_id = str(doc_id_value) if doc_id_value else None
+        doc_id = _resolve_source_doc_id(source)
 
         # Sources without doc_id cannot be joined to the registry
         if not doc_id:
@@ -49,6 +49,99 @@ def _attach_original_filenames(
         source["original_filename"] = original_filename_by_doc_id[doc_id]
 
     return sources
+
+
+def _expand_pages(source: dict[str, object]) -> list[int]:
+    """Return a deduplicated page list for one source item."""
+    page_start_value = source.get("page_start")
+    page_end_value = source.get("page_end")
+
+    if page_start_value is None and page_end_value is None:
+        return []
+
+    if page_start_value is None:
+        page_start_value = page_end_value
+    if page_end_value is None:
+        page_end_value = page_start_value
+
+    try:
+        page_start = int(page_start_value)
+        page_end = int(page_end_value)
+    except (TypeError, ValueError):
+        return []
+
+    if page_end < page_start:
+        page_start, page_end = page_end, page_start
+
+    return list(range(page_start, page_end + 1))
+
+
+def _collapse_sources_to_references(
+    sources: list[dict[str, object]],
+    registry: DocumentRegistry,
+) -> list[dict[str, object]]:
+    """Collapse chunk-level sources into document-level references."""
+    normalized_sources = _attach_original_filenames(sources, registry)
+    references_by_key: dict[str, dict[str, object]] = {}
+
+    for index, source in enumerate(normalized_sources):
+        doc_id = _resolve_source_doc_id(source)
+        original_filename = source.get("original_filename")
+        source_file = source.get("source_file")
+        reference_key = str(doc_id or original_filename or source_file or "unknown")
+
+        if reference_key not in references_by_key:
+            references_by_key[reference_key] = {
+                "order": index,
+                "doc_id": doc_id,
+                "original_filename": original_filename,
+                "pages": set(),
+            }
+
+        reference = references_by_key[reference_key]
+        reference["pages"].update(_expand_pages(source))
+
+    collapsed_references: list[dict[str, object]] = []
+    for reference in references_by_key.values():
+        collapsed_references.append(
+            {
+                "doc_id": reference["doc_id"],
+                "original_filename": reference["original_filename"],
+                "pages": sorted(reference["pages"]),
+                "order": reference["order"],
+            }
+        )
+
+    collapsed_references.sort(
+        key=lambda reference: (
+            int(reference["order"]),
+            str(reference["original_filename"] or ""),
+        )
+    )
+    for reference in collapsed_references:
+        reference.pop("order", None)
+    return collapsed_references
+
+
+def _resolve_source_doc_id(source: dict[str, object]) -> str | None:
+    """Resolve a registry doc_id from the source payload.
+
+    Older indexed chunks may be missing `doc_id` in their stored payload while still
+    exposing the managed filename like `doc_<hash>.pdf` as `source_file`.
+    """
+    doc_id_value = source.get("doc_id")
+    if doc_id_value:
+        return str(doc_id_value)
+
+    source_file_value = source.get("source_file")
+    if not source_file_value:
+        return None
+
+    source_stem = Path(str(source_file_value)).stem
+    if source_stem.startswith("doc_"):
+        return source_stem
+
+    return None
 
 
 @router.post("/query", response_model=QueryResponse)
@@ -78,7 +171,7 @@ def query_documents(
     payload = result.to_dict()
 
     # Replace managed storage names with the real uploaded filenames when possible
-    payload["sources"] = _attach_original_filenames(payload["sources"], registry)
+    payload["sources"] = _collapse_sources_to_references(payload["sources"], registry)
 
     return QueryResponse.model_validate(payload)
 
@@ -123,7 +216,7 @@ def stream_query_documents(
         start_data = start_payload.to_dict()
 
         # Replace managed storage names with the real uploaded filenames when possible
-        start_data["sources"] = _attach_original_filenames(start_data["sources"], registry)
+        start_data["sources"] = _collapse_sources_to_references(start_data["sources"], registry)
 
         # Send initial metadata before token streaming starts
         yield _event_line("start", start_data)
