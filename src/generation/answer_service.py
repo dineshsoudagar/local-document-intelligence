@@ -131,7 +131,11 @@ class GroundedAnswerService:
             query,
             doc_ids=doc_ids,
         )
-        resolved_mode, fallback_reason = self._resolve_mode(mode, retrieved_chunks)
+        resolved_mode, fallback_reason = self._resolve_mode(
+            mode,
+            retrieved_chunks,
+            doc_ids=doc_ids,
+        )
 
         if resolved_mode == "chat":
             answer_text, generation_seconds = self._generate_text(
@@ -204,7 +208,11 @@ class GroundedAnswerService:
             query,
             doc_ids=doc_ids,
         )
-        resolved_mode, fallback_reason = self._resolve_mode(mode, retrieved_chunks)
+        resolved_mode, fallback_reason = self._resolve_mode(
+            mode,
+            retrieved_chunks,
+            doc_ids=doc_ids,
+        )
 
         if resolved_mode == "chat":
             return self._build_stream_response(
@@ -335,6 +343,8 @@ class GroundedAnswerService:
             self,
             requested_mode: str,
             retrieved_chunks: Sequence[RetrievedChunk],
+            *,
+            doc_ids: list[str] | None = None,
     ) -> tuple[str, str | None]:
         """Resolve auto mode into grounded or chat."""
         if requested_mode == "grounded":
@@ -342,6 +352,10 @@ class GroundedAnswerService:
         if requested_mode == "chat":
             return "chat", None
         if requested_mode == "auto":
+            # If the user explicitly scoped the query to one document, stay on the
+            # grounded path and let retrieval decide whether evidence exists.
+            if doc_ids and len(doc_ids) == 1:
+                return "grounded", None
             use_grounded, fallback_reason = self._should_use_grounded(retrieved_chunks)
             if use_grounded:
                 return "grounded", None

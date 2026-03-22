@@ -87,6 +87,33 @@ export default function App() {
     };
   }, []);
 
+  useEffect(() => {
+    // Keep selection aligned with the current document list.
+    if (documents.length === 0) {
+      if (selectedDocId !== null) {
+        setSelectedDocId(null);
+      }
+      return;
+    }
+
+    const hasSelectedDocument = selectedDocId
+      ? documents.some((document) => document.doc_id === selectedDocId)
+      : false;
+
+    if (hasSelectedDocument) {
+      return;
+    }
+
+    if (documents.length === 1) {
+      setSelectedDocId(documents[0].doc_id);
+      return;
+    }
+
+    if (selectedDocId !== null) {
+      setSelectedDocId(null);
+    }
+  }, [documents, selectedDocId]);
+
   // Stop the active streaming query and reset the UI back to idle.
   function handleStop() {
     abortControllerRef.current?.abort();
@@ -98,13 +125,15 @@ export default function App() {
   async function handleSubmit() {
     // Ignore empty submissions so the backend is only called with real input.
     const trimmedQuery = queryText.trim();
+    const effectiveSelectedDocId =
+      selectedDocId ?? (documents.length === 1 ? documents[0].doc_id : null);
 
     if (!trimmedQuery) {
       return;
     }
 
     // Document-only mode requires an explicit document selection first.
-    if (uiMode === "document" && !selectedDocId) {
+    if (uiMode === "document" && !effectiveSelectedDocId) {
       setQueryError("Select a document first.");
       return;
     }
@@ -152,8 +181,8 @@ export default function App() {
       let docIds: string[] | undefined;
 
       // When a document is selected, scope retrieval to that document if the mode allows it.
-      if ((uiMode === "document" || uiMode === "auto") && selectedDocId) {
-        docIds = [selectedDocId];
+      if ((uiMode === "document" || uiMode === "auto") && effectiveSelectedDocId) {
+        docIds = [effectiveSelectedDocId];
       }
 
       // Build the request payload and include doc_ids only when a document filter exists.

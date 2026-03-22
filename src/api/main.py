@@ -11,6 +11,7 @@ from src.api.routes_health import router as health_router
 from src.api.routes_query import router as query_router
 from src.app.document_registry import DocumentRegistry
 from src.app.paths import AppPaths
+from src.config.api_config import ApiConfig
 from src.config.generator_config import GeneratorConfig
 from src.generation.answer_service import GroundedAnswerService
 from src.indexing.index_service import IndexService
@@ -57,6 +58,7 @@ async def lifespan(app: FastAPI):
 
 def create_app() -> FastAPI:
     # Create the FastAPI app
+    api_config = ApiConfig()
     app = FastAPI(
         title="Offline Document Intelligence API",
         version="0.1.0",
@@ -66,7 +68,7 @@ def create_app() -> FastAPI:
     # Allow the React dev server to call this backend
     app.add_middleware(
         CORSMiddleware,
-        allow_origins=["http://localhost:5173"],
+        allow_origins=[api_config.frontend_origin],
         allow_credentials=True,
         allow_methods=["*"],
         allow_headers=["*"],
