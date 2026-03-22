@@ -1,0 +1,431 @@
+22-Mar-2026
+
+RETRIEVAL PLANNER - LEARNING NOTE
+
+1. Why we added a planner
+
+Before this change, the system treated almost every query the same way:
+
+    user query
+    -> retriever.search(raw_query)
+    -> top chunks
+    -> context builder
+    -> generator answer
+
+This is okay for narrow questions like:
+    "What datasets were used?"
+or
+    "What does the paper say about SELF-ROUTE?"
+
+But it is weak for broad requests like:
+    "Summarize this document"
+because the retriever only sees the raw words of the query.
+It does not naturally understand:
+    "for a summary, I should retrieve abstract, introduction, results, conclusion"
+
+So we added a planner.
+
+The planner is a small decision layer before retrieval.
+Its job is not to generate the answer.
+Its job is to decide HOW retrieval should happen.
+
+--------------------------------------------------
+2. What the planner does
+--------------------------------------------------
+
+The planner reads the query and decides things like:
+
+- What kind of query is this?
+  - factual
+  - explanation
+  - broad summary
+  - comparison
+
+- Should we use one retrieval query or multiple?
+
+- How many chunks should we retrieve?
+
+- What kind of reranking instruction should we use?
+
+- Which sections should be preferred?
+  - abstract
+  - introduction
+  - results
+  - conclusion
+
+- Which sections should be discouraged?
+  - references
+  - appendix
+  - acknowledgements
+
+So the planner changes retrieval from:
+    "always search the same way"
+to:
+    "search differently depending on the user intent"
+
+--------------------------------------------------
+3. Main modules and what they do
+--------------------------------------------------
+
+A. GroundedAnswerService
+This is the main orchestration layer.
+
+It does:
+1. receive the user query
+2. retrieve chunks
+3. build a grounded context
+4. generate the final answer
+
+What changed:
+- Instead of directly calling the retriever with the raw query,
+  it now calls the planner first.
+
+So now the flow is:
+
+    query
+    -> planner
+    -> retriever
+    -> context builder
+    -> generator
+
+B. QueryPlanner
+This is the new module we added.
+
+It does:
+1. inspect the user query
+2. classify the query type
+3. create a retrieval plan
+4. run one or more retrieval searches
+5. merge duplicate hits
+6. boost useful sections
+7. penalize noisy sections
+8. keep a diverse final set of chunks
+
+Important:
+The planner does not answer the question.
+It only improves chunk selection.
+
+C. QdrantHybridIndex
+This is the retriever.
+
+It does:
+1. dense retrieval
+2. sparse retrieval
+3. fuse both result sets
+4. rerank the fused candidates
+5. blend scores
+6. return final chunks
+
+What changed:
+- It can now accept a custom rerank instruction from the planner.
+
+That means:
+- factual query can use factual reranking
+- summary query can use summary-oriented reranking
+- comparison query can use comparison-oriented reranking
+
+D. build_grounded_context
+This takes the final selected chunks and packs them into prompt context.
+
+We did not change this part in the first step.
+
+E. LocalQwenGenerator
+This is still the answer generator.
+
+It receives:
+- query
+- grounded context
+
+and generates the final answer.
+
+We did not change the generator logic in this step.
+
+--------------------------------------------------
+4. Search process - step by step
+--------------------------------------------------
+
+OLD PROCESS
+
+1. user sends query
+2. GroundedAnswerService sends raw query directly to retriever
+3. retriever runs dense + sparse + fusion + rerank
+4. top chunks are returned
+5. context builder packs those chunks
+6. generator answers from them
+
+Problem:
+The retrieval strategy is the same for all query types.
+
+NEW PROCESS
+
+1. user sends query
+2. GroundedAnswerService sends the query to QueryPlanner
+3. QueryPlanner classifies the query
+4. QueryPlanner creates a retrieval plan
+5. QueryPlanner decides:
+   - one query or many
+   - how many candidates
+   - which rerank instruction
+   - which section types to prefer
+6. QueryPlanner runs retrieval through QdrantHybridIndex
+7. retriever returns candidate chunks
+8. planner merges and rescales results
+9. planner keeps a diverse final set
+10. context builder builds grounded context
+11. generator writes the final answer
+
+--------------------------------------------------
+5. What "query planning" means in practice
+--------------------------------------------------
+
+It means the system does not trust the raw query alone.
+
+Instead, it asks:
+    "What is the user trying to do?"
+
+That one question changes retrieval quality a lot.
+
+For example:
+
+- "What is the accuracy on dataset X?"
+  -> focused query
+  -> small, direct retrieval
+
+- "Explain the method"
+  -> explanation query
+  -> slightly broader retrieval
+
+- "Summarize this document"
+  -> broad summary
+  -> multiple retrieval probes
+  -> section-aware scoring
+  -> diversity constraints
+
+--------------------------------------------------
+6. Example 1 - factual / focused query
+--------------------------------------------------
+
+User query:
+    "What does the paper say about SELF-ROUTE?"
+
+Step 1: planner reads the query
+The planner sees this is not asking for the whole document.
+It is asking about one specific concept.
+
+Step 2: planner classifies it
+Likely:
+    factual
+or
+    explanation
+
+Step 3: planner makes a plan
+Possible plan:
+- use the original query
+- maybe add one supporting probe like:
+  "SELF-ROUTE method results"
+- use factual reranking
+- retrieve a moderate number of candidate chunks
+- keep a focused final set
+
+Step 4: retriever runs search
+The retriever looks for chunks related to SELF-ROUTE.
+Because the query is specific, the best chunks are likely from:
+- method
+- results
+- conclusion
+
+Step 5: planner post-processes results
+If several good chunks come from the same section, that is okay,
+because this is a focused question.
+We do not need broad document coverage here.
+
+Step 6: context builder builds prompt context
+Only the most relevant chunks are packed.
+
+Step 7: generator answers
+Now the model answers specifically about SELF-ROUTE,
+instead of trying to summarize the whole paper.
+
+Why this works:
+Because the system treats this as a narrow question,
+not as a broad document-level request.
+
+--------------------------------------------------
+7. Example 2 - broad summary query
+--------------------------------------------------
+
+User query:
+    "Summarize this document"
+
+This is the important case.
+
+Step 1: planner reads the query
+The planner sees this is broad and document-level.
+
+It understands:
+- the user is not asking for one fact
+- the user wants an overview of the whole document
+- retrieval should cover important sections
+
+Step 2: planner classifies it
+Classification:
+    broad_summary
+
+Step 3: planner creates multiple retrieval probes
+Instead of searching only:
+    "Summarize this document"
+
+it creates broader probes such as:
+- original query
+- "abstract introduction overview problem statement main contribution"
+- "method approach experiment results findings"
+- "conclusion discussion limitations future work"
+
+Why?
+Because the raw query itself does not mention important document content.
+These probes give retrieval better anchors.
+
+Step 4: retriever runs search for each probe
+For each retrieval query:
+- dense retrieval runs
+- sparse retrieval runs
+- results are fused
+- reranker scores candidates
+
+Now we have multiple groups of candidate chunks.
+
+Step 5: planner merges duplicate chunks
+If the same chunk appears from multiple probes,
+that is a strong signal that the chunk is central.
+
+Example:
+A chunk from the abstract may appear in:
+- overview probe
+- contribution probe
+- summary probe
+
+That chunk should usually get extra value.
+
+Step 6: planner applies section-aware rescoring
+Now the planner looks at metadata like headings.
+
+It may:
+boost:
+- abstract
+- introduction
+- results
+- conclusion
+
+penalize:
+- references
+- appendix
+- acknowledgements
+
+Why?
+Because a good summary should usually come from the main content,
+not from end matter.
+
+Step 7: planner applies diversity filtering
+This is important.
+
+Without diversity filtering, you can end up with:
+- 5 chunks all from one appendix page
+or
+- many chunks all from the same heading
+
+The planner prevents that by limiting:
+- too many chunks from one heading
+- too many chunks from one page
+
+So the final set is more balanced.
+
+Step 8: context builder packs the selected chunks
+Now the context is more likely to represent the whole document.
+
+Step 9: generator answers
+The generator now sees evidence from:
+- the start of the paper
+- the method or result area
+- the conclusion
+
+So the final summary is far better.
+
+Why this works:
+Because the system moves from local relevance
+to intent-aware and structure-aware retrieval.
+
+--------------------------------------------------
+8. What changed technically
+--------------------------------------------------
+
+In answer_service.py
+We changed the retrieval entry point.
+
+Before:
+    _retrieve_chunks()
+    -> self._index.search(query, doc_ids=doc_ids)
+
+After:
+    _retrieve_chunks()
+    -> self._planner.retrieve(index=self._index, query=query, doc_ids=doc_ids)
+
+Meaning:
+The service no longer decides retrieval directly.
+It delegates retrieval strategy to the planner.
+
+In qdrant_hybrid_index.py
+We added support for:
+    rerank_instruction: str | None = None
+
+Meaning:
+The planner can tell the retriever which rerank objective to use.
+
+That matters because:
+- a QA query should ask:
+  "does this chunk answer the question?"
+- a summary query should ask:
+  "is this chunk useful for a faithful summary?"
+- a comparison query should ask:
+  "is this chunk useful for comparison?"
+
+--------------------------------------------------
+9. Why this improves the system
+--------------------------------------------------
+
+This improves the system because retrieval is no longer blind to query intent.
+
+Before:
+- all queries used the same retrieval style
+
+After:
+- retrieval strategy depends on the task
+
+So now:
+- narrow questions stay focused
+- broad summary queries become broader and more structured
+- chunk selection becomes more intentional
+- final answers become more grounded
+
+--------------------------------------------------
+10. Final summary
+--------------------------------------------------
+
+What we did:
+
+1. Added a QueryPlanner before retrieval
+2. Let the planner classify the query type
+3. Let the planner choose retrieval strategy
+4. Let the planner run multiple retrieval probes when needed
+5. Let the planner rescore chunks using document structure
+6. Let the planner keep a more diverse final chunk set
+7. Let the retriever accept task-specific rerank instructions
+
+Core idea:
+
+    Better answers do not start at generation.
+    They start with better chunk selection.
+
+One-line takeaway:
+
+    We changed the system from raw-query retrieval
+    to intent-aware retrieval.
