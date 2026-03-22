@@ -137,20 +137,25 @@ class QdrantHybridIndex:
         )
 
     def search(
-            self,
-            query: str,
-            top_k: int | None = None,
-            doc_ids: list[str] | None = None,
+        self,
+        query: str,
+        top_k: int | None = None,
+        doc_ids: list[str] | None = None,
+        rerank_instruction: str | None = None,
     ) -> list[RetrievedChunk]:
-        """Run hybrid retrieval, rerank fused candidates, and blend both scores."""
+        """Run hybrid retrieval, rerank fused candidates, and return final results."""
         fused_limit = self._config.fused_top_k
         final_limit = top_k or self._config.final_top_k
+
+        # Prefer the planner-specific rerank instruction when provided.
+        instruction = rerank_instruction or self._config.rerank_instruction
 
         dense_query = self._embedder.encode_query(query)
         sparse_query = models.Document(
             text=query,
             model=self._config.sparse_model_name,
         )
+
         doc_filter = self._build_doc_filter(doc_ids)
 
         response = self._client.query_points(
@@ -160,13 +165,13 @@ class QdrantHybridIndex:
                     query=sparse_query,
                     using=self._config.sparse_vector_name,
                     limit=self._config.sparse_top_k,
-                    filter=doc_filter
+                    filter=doc_filter,
                 ),
                 models.Prefetch(
                     query=dense_query,
                     using=self._config.dense_vector_name,
                     limit=self._config.dense_top_k,
-                    filter=doc_filter
+                    filter=doc_filter,
                 ),
             ],
             query=models.FusionQuery(fusion=models.Fusion.RRF),
@@ -180,10 +185,11 @@ class QdrantHybridIndex:
             return []
 
         reranker = self._get_reranker()
+
         rerank_scores = reranker.score(
             query=query,
             documents=[candidate["text"] for candidate in fused_candidates],
-            instruction=self._config.rerank_instruction,
+            instruction=instruction,
         )
 
         if len(rerank_scores) != len(fused_candidates):
@@ -200,14 +206,14 @@ class QdrantHybridIndex:
 
         results: list[RetrievedChunk] = []
         for candidate, rerank_score, fusion_norm, rerank_norm in zip(
-                fused_candidates,
-                rerank_scores,
-                fusion_norms,
-                rerank_norms,
+            fused_candidates,
+            rerank_scores,
+            fusion_norms,
+            rerank_norms,
         ):
             final_score = (
-                    fusion_weight * fusion_norm
-                    + rerank_weight * rerank_norm
+                fusion_weight * fusion_norm
+                + rerank_weight * rerank_norm
             )
             results.append(
                 RetrievedChunk(
@@ -423,11 +429,9 @@ class QdrantHybridIndex:
         if not rerank_scores:
             return 0.75, 0.25
 
-        # Work on descending scores so rank-1 and rank-2 are explicit.
         sorted_scores = sorted(rerank_scores, reverse=True)
 
-        # Compare the best score against the top candidate pool, not the full tail.
-        # Using the full list would let very weak bottom candidates distort the mean.
+        # Measure separation against the strongest candidate pool only.
         top_n = min(self._config.dynamic_blend_top_n, len(sorted_scores))
         top_scores = sorted_scores[:top_n]
 
@@ -435,30 +439,23 @@ class QdrantHybridIndex:
         top2 = sorted_scores[1] if len(sorted_scores) > 1 else sorted_scores[0]
         top_mean = sum(top_scores) / len(top_scores)
 
-        # Separation signals:
-        # - top_gap: how much the best candidate beats the second-best candidate
-        # - top_vs_mean: how much the best candidate stands above the top candidate pool
         top_gap = top1 - top2
         top_vs_mean = top1 - top_mean
 
-        # Strong reranker confidence:
-        # require both a clear lead over rank-2 and a clear lead over the top-group mean.
+        # Increase reranker influence when the top result separates clearly.
         if (
                 top_gap >= self._config.rerank_strong_top_gap
                 and top_vs_mean >= self._config.rerank_strong_top_vs_mean
         ):
             return 0.45, 0.55
 
-        # Medium reranker confidence:
-        # one moderate separation signal is enough to increase reranker influence slightly.
         if (
                 top_gap >= self._config.rerank_medium_top_gap
                 or top_vs_mean >= self._config.rerank_medium_top_vs_mean
         ):
             return 0.60, 0.40
 
-        # Weak reranker confidence:
-        # scores are too flat to trust reranker strongly, so lean on fusion.
+        # Flat reranker scores favor the fused retrieval score.
         return 0.75, 0.25
 
     @staticmethod

@@ -1,0 +1,18 @@
+made a lot of UI improvements
+
+Fixed auto mode with a selected single document so retrieval stays scoped correctly.
+Moved upload controls into the chat composer area.
+Made the whole composer a drag-and-drop PDF upload zone.
+Auto-selected newly uploaded documents.
+Reworked composer layout into textarea left, actions right.
+Merged Ask and Stop into one stateful Send/Stop button.
+Tightened button spacing, sizing, and alignment.
+Removed the separate right evidence pane.
+Showed retrieved document references below assistant replies.
+Changed source display to one dimmed wrapped line outside the bubble.
+Added persisted light/dark theme toggle.
+Replaced theme toggle text with icons.
+Dimmed chat bubble colors in dark mode.
+Moved mode controls between transcript and input.
+Added inline Select mode: label and adjusted its spacing.
+Removed extra helper/status text to simplify the UI.
