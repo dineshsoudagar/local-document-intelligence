@@ -120,6 +120,9 @@ export default function App() {
   // Tracks which document is currently being deleted
   const [deletingDocId, setDeletingDocId] = useState<string | null>(null);
 
+  // Tracks which document action menu is open
+  const [openMenuDocId, setOpenMenuDocId] = useState<string | null>(null);
+
   // Tracks drag-over styling for the drop zone
   const [isDragOver, setIsDragOver] = useState(false);
 
@@ -203,6 +206,18 @@ export default function App() {
     return () => {
       window.removeEventListener("dragover", preventWindowDrop);
       window.removeEventListener("drop", preventWindowDrop);
+    };
+  }, []);
+
+  useEffect(() => {
+    function handleWindowClick() {
+      setOpenMenuDocId(null);
+    }
+
+    window.addEventListener("click", handleWindowClick);
+
+    return () => {
+      window.removeEventListener("click", handleWindowClick);
     };
   }, []);
 
@@ -433,6 +448,8 @@ export default function App() {
   }
 
   async function handleDeleteDocument(document: DocumentItem) {
+    setOpenMenuDocId(null);
+
     const confirmed = window.confirm(
       `Delete "${document.original_filename}" from the uploaded documents?`,
     );
@@ -594,15 +611,56 @@ export default function App() {
                   {document.original_filename}
                 </button>
 
-                <button
-                  type="button"
-                  className="delete-document-button"
-                  onClick={() => handleDeleteDocument(document)}
-                  disabled={deletingDocId === document.doc_id}
-                  aria-label={`Delete ${document.original_filename}`}
+                <div
+                  className="document-actions"
+                  onClick={(event) => event.stopPropagation()}
                 >
-                  {deletingDocId === document.doc_id ? "..." : "Delete"}
-                </button>
+                  <button
+                    type="button"
+                    className="document-menu-button"
+                    onClick={(event) => {
+                      event.stopPropagation();
+                      setOpenMenuDocId((current) =>
+                        current === document.doc_id ? null : document.doc_id,
+                      );
+                    }}
+                    disabled={deletingDocId === document.doc_id}
+                    aria-label={`Open actions for ${document.original_filename}`}
+                    aria-haspopup="menu"
+                    aria-expanded={openMenuDocId === document.doc_id}
+                  >
+                    <svg viewBox="0 0 24 24" aria-hidden="true">
+                      <circle cx="5" cy="12" r="1.75" />
+                      <circle cx="12" cy="12" r="1.75" />
+                      <circle cx="19" cy="12" r="1.75" />
+                    </svg>
+                  </button>
+
+                  {openMenuDocId === document.doc_id && (
+                    <div className="document-menu" role="menu">
+                      <button
+                        type="button"
+                        className="document-menu-item delete"
+                        onClick={(event) => {
+                          event.stopPropagation();
+                          void handleDeleteDocument(document);
+                        }}
+                        disabled={deletingDocId === document.doc_id}
+                        role="menuitem"
+                      >
+                        <svg viewBox="0 0 24 24" aria-hidden="true">
+                          <path d="M9 3h6l1 2h4v2H4V5h4l1-2Z" />
+                          <path d="M6 9h12l-1 10a2 2 0 0 1-2 2H9a2 2 0 0 1-2-2L6 9Z" />
+                          <path d="M10 11v6" />
+                          <path d="M14 11v6" />
+                        </svg>
+                        <span>
+                          {deletingDocId === document.doc_id ? "Deleting..." : "Delete"}
+                        </span>
+                      </button>
+                    </div>
+                  )}
+                </div>
               </div>
             </li>
           ))}
