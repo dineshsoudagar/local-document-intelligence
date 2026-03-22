@@ -14,6 +14,7 @@ import type {
 } from "./types";
 
 export default function App() {
+  // App owns the shared frontend state and passes focused slices into each pane.
   const [documents, setDocuments] = useState<DocumentItem[]>([]);
   const [error, setError] = useState<string | null>(null);
   const [selectedDocId, setSelectedDocId] = useState<string | null>(null);
@@ -32,6 +33,7 @@ export default function App() {
   const [fallbackReason, setFallbackReason] = useState<string | null>(null);
   const abortControllerRef = useRef<AbortController | null>(null);
 
+  // Pull the latest uploaded documents from the backend so the left pane stays in sync.
   async function loadDocuments() {
     try {
       setError(null);
@@ -47,14 +49,17 @@ export default function App() {
   }
 
   useEffect(() => {
+    // Load initial document data once when the app mounts.
     loadDocuments();
 
     return () => {
+      // Cancel any in-flight query if the page is being torn down.
       abortControllerRef.current?.abort();
     };
   }, []);
 
   useEffect(() => {
+    // Close any open document action menu when the user clicks elsewhere.
     function handleWindowClick() {
       setOpenMenuDocId(null);
     }
@@ -66,6 +71,7 @@ export default function App() {
     };
   }, []);
 
+  // Stop the active streaming query and reset the UI back to idle.
   function handleStop() {
     abortControllerRef.current?.abort();
     abortControllerRef.current = null;
@@ -74,15 +80,18 @@ export default function App() {
   }
 
   async function handleSubmit() {
+    // Ignore empty submissions so the backend is only called with real input.
     if (!queryText.trim()) {
       return;
     }
 
+    // Document-only mode requires an explicit document selection first.
     if (uiMode === "document" && !selectedDocId) {
       setQueryError("Select a document first.");
       return;
     }
 
+    // Replace any older request so only the newest query continues streaming.
     abortControllerRef.current?.abort();
     const controller = new AbortController();
     abortControllerRef.current = controller;
@@ -96,6 +105,7 @@ export default function App() {
     setQueryStatus("retrieving");
 
     try {
+      // Translate the UI-specific mode labels into the backend API contract.
       let backendMode: BackendQueryMode = "grounded";
 
       if (uiMode === "chat") {
@@ -106,10 +116,12 @@ export default function App() {
 
       let docIds: string[] | undefined;
 
+      // When a document is selected, scope retrieval to that document if the mode allows it.
       if ((uiMode === "document" || uiMode === "auto") && selectedDocId) {
         docIds = [selectedDocId];
       }
 
+      // Build the request payload and include doc_ids only when a document filter exists.
       const payload: QueryRequestPayload = {
         query: queryText,
         mode: backendMode,
@@ -118,25 +130,30 @@ export default function App() {
 
       await streamQuery(payload, controller.signal, {
         onStart: (data) => {
+          // The start event tells us which evidence was chosen before tokens arrive.
           setSources(data.sources);
           setResolvedMode(data.mode_used);
           setFallbackReason(data.fallback_reason);
           setQueryStatus("generating");
         },
         onToken: (text) => {
+          // Append streamed tokens so the answer appears progressively.
           setAnswer((current) => current + text);
         },
         onDone: (data) => {
+          // Replace the streamed draft with the backend's final answer snapshot.
           setAnswer(data.answer);
           setQueryStatus("idle");
         },
       });
     } catch (err) {
+      // User-triggered cancellation is an expected path, not an error state.
       if (err instanceof DOMException && err.name === "AbortError") {
         setQueryStatus("idle");
         return;
       }
 
+      // Surface backend or network failures inside the query pane.
       if (err instanceof Error) {
         setQueryError(err.message);
       } else {
@@ -145,11 +162,13 @@ export default function App() {
 
       setQueryStatus("error");
     } finally {
+      // Release the controller so the next query starts from a clean state.
       abortControllerRef.current = null;
       setIsSubmitting(false);
     }
   }
 
+  // Upload one PDF, then refresh the document list and select the new item.
   async function handleUploadFile(file: File) {
     if (!file.name.toLowerCase().endsWith(".pdf")) {
       setUploadError("Only PDF files are supported right now.");
@@ -160,6 +179,7 @@ export default function App() {
     setIsUploading(true);
 
     try {
+      // Refresh after upload so any backend-generated metadata is reflected in the UI.
       const data = await uploadDocument(file);
       await loadDocuments();
       setSelectedDocId(data.document.doc_id);
@@ -174,6 +194,7 @@ export default function App() {
     }
   }
 
+  // Delete a document from the backend and remove it from local state after confirmation.
   async function handleDeleteDocument(document: DocumentItem) {
     setOpenMenuDocId(null);
 
@@ -190,8 +211,10 @@ export default function App() {
 
     try {
       const data = await deleteDocument(document.doc_id);
+      // Update the list locally so the UI responds immediately after deletion.
       setDocuments((current) => current.filter((item) => item.doc_id !== data.doc_id));
 
+      // Clear the selection if the deleted document was the active one.
       if (selectedDocId === data.doc_id) {
         setSelectedDocId(null);
       }
@@ -208,6 +231,7 @@ export default function App() {
 
   return (
     <div className="app-shell">
+      {/* Left pane handles upload, selection, and document actions. */}
       <DocumentsPane
         documents={documents}
         selectedDocId={selectedDocId}
@@ -222,6 +246,7 @@ export default function App() {
         onUploadFile={handleUploadFile}
       />
 
+      {/* Center pane owns query input, answer display, and query status messaging. */}
       <QueryPane
         uiMode={uiMode}
         queryStatus={queryStatus}
@@ -237,6 +262,7 @@ export default function App() {
         onStop={handleStop}
       />
 
+      {/* Right pane shows the retrieved evidence chunks that supported the answer. */}
       <EvidencePane sources={sources} />
     </div>
   );

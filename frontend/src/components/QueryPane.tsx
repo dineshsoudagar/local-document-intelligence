@@ -34,6 +34,7 @@ export function QueryPane({
       <div className="center-header">
         <h2>Query Workspace</h2>
 
+        {/* These buttons switch how the backend should interpret the query. */}
         <div className="scope-toggle">
           <button
             type="button"
@@ -68,6 +69,7 @@ export function QueryPane({
           </button>
         </div>
 
+        {/* Show live query metadata once a request starts or when the backend resolves auto mode. */}
         {(isSubmitting || resolvedMode || fallbackReason || queryStatus !== "idle") && (
           <div className="query-meta">
             <div>Status: {queryStatus}</div>
@@ -79,6 +81,7 @@ export function QueryPane({
         {queryError && <p className="query-error">{queryError}</p>}
       </div>
 
+      {/* The answer box shows either the streamed response or a placeholder before the first query. */}
       <div className="answer-box">
         <h3>Answer</h3>
         <pre className="answer-text">{answer || "No answer yet"}</pre>
@@ -98,12 +101,14 @@ export function QueryPane({
             value={queryText}
             onChange={(event) => onQueryTextChange(event.target.value)}
             onKeyDown={(event) => {
+              // Pressing Enter triggers the same submit path as the Ask button.
               if (event.key === "Enter" && !isSubmitting) {
                 onSubmit();
               }
             }}
           />
 
+          {/* Ask starts a new query; Stop cancels the current stream. */}
           <button
             type="button"
             className="submit-button ask-button"

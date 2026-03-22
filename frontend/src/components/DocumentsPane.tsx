@@ -31,10 +31,12 @@ export function DocumentsPane({
   const fileInputRef = useRef<HTMLInputElement | null>(null);
   const [isDragOver, setIsDragOver] = useState(false);
 
+  // Ignore non-file drags so text selections and other drag events do not trigger upload UI.
   function isFileDrag(event: DragEvent | React.DragEvent<HTMLElement>) {
     return Array.from(event.dataTransfer?.types ?? []).includes("Files");
   }
 
+  // Prefer the dragged file item, then fall back to the browser's file list.
   function getDraggedFile(event: React.DragEvent<HTMLElement>) {
     const item = Array.from(event.dataTransfer.items ?? []).find(
       (candidate) => candidate.kind === "file",
@@ -48,6 +50,7 @@ export function DocumentsPane({
   }
 
   useEffect(() => {
+    // Prevent the browser from navigating away when a file is dropped outside the pane.
     function preventWindowDrop(event: DragEvent) {
       if (!isFileDrag(event)) {
         return;
@@ -65,10 +68,12 @@ export function DocumentsPane({
     };
   }, []);
 
+  // Opens the hidden native file picker.
   function handleOpenFilePicker() {
     fileInputRef.current?.click();
   }
 
+  // Accept one chosen file and reuse the same upload flow as drag and drop.
   async function handleFileInputChange(
     event: React.ChangeEvent<HTMLInputElement>,
   ) {
@@ -81,6 +86,7 @@ export function DocumentsPane({
     event.target.value = "";
   }
 
+  // Prevent browser default so dropping a file stays inside the app.
   function handleDragOver(event: React.DragEvent<HTMLElement>) {
     if (!isFileDrag(event)) {
       return;
@@ -91,6 +97,7 @@ export function DocumentsPane({
     setIsDragOver(true);
   }
 
+  // Remove drag highlight only when the pointer fully leaves the drop zone.
   function handleDragLeave(event: React.DragEvent<HTMLElement>) {
     if (!isFileDrag(event)) {
       return;
@@ -105,6 +112,7 @@ export function DocumentsPane({
     setIsDragOver(false);
   }
 
+  // Accept one dropped file and send it through the same upload path.
   async function handleDrop(event: React.DragEvent<HTMLElement>) {
     if (!isFileDrag(event)) {
       return;
@@ -138,6 +146,7 @@ export function DocumentsPane({
         onChange={handleFileInputChange}
       />
 
+      {/* The visible upload button controls the hidden file input above. */}
       <div className="upload-dropzone">
         <button
           type="button"
@@ -158,6 +167,7 @@ export function DocumentsPane({
         {documents.map((document) => (
           <li key={document.doc_id}>
             <div className="document-row">
+              {/* Selecting a document makes it available for single-document queries. */}
               <button
                 type="button"
                 className={
@@ -174,6 +184,7 @@ export function DocumentsPane({
                 className="document-actions"
                 onClick={(event) => event.stopPropagation()}
               >
+                {/* Keep menu clicks local so the global window click handler does not close it immediately. */}
                 <button
                   type="button"
                   className="document-menu-button"
@@ -196,6 +207,7 @@ export function DocumentsPane({
                 </button>
 
                 {openMenuDocId === document.doc_id && (
+                  // Render actions only for the document whose menu is currently open.
                   <div className="document-menu" role="menu">
                     <button
                       type="button"

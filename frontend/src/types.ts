@@ -1,33 +1,41 @@
+// Minimal document metadata returned by the backend and shown in the document list.
 export type DocumentItem = {
   doc_id: string;
   original_filename: string;
 };
 
+// Wrapper used by the documents listing endpoint.
 export type DocumentsResponse = {
   items: DocumentItem[];
 };
 
+// Response returned after a successful upload attempt.
 export type DocumentUploadResponse = {
   message: string;
   deduplicated: boolean;
   document: DocumentItem;
 };
 
+// Response returned after deleting one uploaded document.
 export type DocumentDeleteResponse = {
   message: string;
   doc_id: string;
 };
 
+// Query modes exposed by the frontend controls.
 export type UiQueryMode = "corpus" | "document" | "chat" | "auto";
 
+// Query modes accepted by the backend API.
 export type BackendQueryMode = "grounded" | "chat" | "auto";
 
+// Payload sent when starting a new query request.
 export type QueryRequestPayload = {
   query: string;
   mode: BackendQueryMode;
   doc_ids?: string[];
 };
 
+// One retrieved evidence chunk returned by the backend for grounding.
 export type QuerySource = {
   rank: number;
   chunk_id: string;
@@ -42,6 +50,7 @@ export type QuerySource = {
   block_type: string | null;
 };
 
+// First streaming event: metadata about retrieval before answer tokens begin.
 export type QueryStreamStart = {
   query: string;
   mode_used: string;
@@ -52,6 +61,7 @@ export type QueryStreamStart = {
   retrieval_seconds: number;
 };
 
+// Final streaming event: complete answer text and timing information.
 export type QueryStreamDone = {
   answer: string;
   timings: {
@@ -61,10 +71,12 @@ export type QueryStreamDone = {
   };
 };
 
+// All event shapes that can arrive over the streaming query endpoint.
 export type QueryStreamEvent =
   | { type: "start"; data: QueryStreamStart }
   | { type: "token"; data: { text: string } }
   | { type: "done"; data: QueryStreamDone }
   | { type: "error"; data: { message: string } };
 
+// Small UI state machine used to drive loading indicators and status text.
 export type QueryStatus = "idle" | "retrieving" | "generating" | "error";
