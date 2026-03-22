@@ -14,4 +14,5 @@ fastapi~=0.135.1
 uvicorn
 pydantic~=2.12.5
 torch~=2.10.0+cu128
-huggingface_hub~=0.36.2
+huggingface_hub
+python-multipart

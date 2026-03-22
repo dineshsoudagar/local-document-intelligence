@@ -20,3 +20,6 @@ useful links : https://docling-project.github.io/docling/examples/pictures_descr
 
 # Fix two chunkers with docling
 # fix original doc id in the chunk itself or in answer service.
+
+# do not fix the front end port in main.py in api ("  http://localhost:5173/)
+"

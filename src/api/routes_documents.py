@@ -2,8 +2,9 @@ from __future__ import annotations
 
 import shutil
 from pathlib import Path
+import tempfile
 import hashlib
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, Depends, HTTPException, UploadFile, File, status
 from datetime import datetime, timezone
 from src.api.app_state import (
     get_app_paths_from_state,
@@ -242,4 +243,117 @@ def delete_document(
     return DocumentDeleteResponse(
         message="Document deleted from registry.",
         doc_id=doc_id,
+    )
+
+
+@router.post("/documents/upload", response_model=DocumentIngestResponse)
+def upload_document(
+        file: UploadFile = File(...),
+        registry: DocumentRegistry = Depends(get_document_registry_from_state),
+        paths: AppPaths = Depends(get_app_paths_from_state),
+        index_service: IndexService = Depends(get_index_service_from_state),
+) -> DocumentIngestResponse:
+    if not file.filename:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Uploaded file must have a filename.",
+        )
+
+    original_filename = file.filename
+    suffix = Path(original_filename).suffix.lower()
+
+    if suffix != ".pdf":
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Only PDF uploads are supported right now.",
+        )
+
+    paths.documents_dir.mkdir(parents=True, exist_ok=True)
+
+    temp_dir = paths.base_dir / "tmp"
+    temp_dir.mkdir(parents=True, exist_ok=True)
+
+    temp_path: Path | None = None
+    doc_id: str | None = None
+
+    try:
+        with tempfile.NamedTemporaryFile(
+                mode="wb",
+                suffix=suffix,
+                dir=temp_dir,
+                delete=False,
+        ) as temp_file:
+            shutil.copyfileobj(file.file, temp_file)
+            temp_path = Path(temp_file.name)
+
+        file_hash = _compute_file_hash(temp_path)
+        doc_id = _build_doc_id(file_hash)
+
+        existing = registry.get_document(doc_id)
+        if existing is not None:
+            temp_path.unlink(missing_ok=True)
+            return DocumentIngestResponse(
+                message="Document already registered.",
+                deduplicated=True,
+                document=DocumentSummaryResponse.from_record(existing),
+            )
+
+        managed_path = _build_managed_document_path(
+            paths=paths,
+            doc_id=doc_id,
+            suffix=suffix,
+        )
+
+        temp_path.replace(managed_path)
+
+        ingested_at = _utc_now_iso()
+
+        registry.create_document(
+            doc_id=doc_id,
+            file_hash=file_hash,
+            original_filename=original_filename,
+            stored_path=str(managed_path),
+            parser_name="docling",
+            parser_version=None,
+            indexed_status="pending",
+            ingested_at=ingested_at,
+        )
+
+    except Exception:
+        if temp_path is not None:
+            temp_path.unlink(missing_ok=True)
+        raise
+    finally:
+        file.file.close()
+
+    try:
+        chunk_count = index_service.index_pdf(managed_path, doc_id=doc_id)
+        indexed_at = _utc_now_iso()
+
+        registry.mark_indexed(
+            doc_id=doc_id,
+            chunk_count=chunk_count,
+            indexed_at=indexed_at,
+        )
+    except Exception as exc:
+        registry.mark_failed(
+            doc_id=doc_id,
+            error_message=str(exc),
+        )
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Upload succeeded but indexing failed: {exc}",
+        ) from exc
+
+    created = registry.get_document(doc_id)
+    if created is None:
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="Document uploaded and indexed, but registry reload failed.",
+        )
+
+    return DocumentIngestResponse(
+        message="Document uploaded and indexed.",
+        deduplicated=False,
+        document=DocumentSummaryResponse.from_record(created),
     )
