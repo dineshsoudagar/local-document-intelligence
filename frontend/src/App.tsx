@@ -2,27 +2,34 @@ import { useEffect, useRef, useState } from "react";
 import "./App.css";
 import { deleteDocument, fetchDocuments, streamQuery, uploadDocument } from "./api";
 import { DocumentsPane } from "./components/DocumentsPane";
-import { EvidencePane } from "./components/EvidencePane";
 import { QueryPane } from "./components/QueryPane";
 import type {
   ChatMessage,
   BackendQueryMode,
   DocumentItem,
   QueryRequestPayload,
-  QuerySource,
   QueryStatus,
   UiQueryMode,
 } from "./types";
 
 export default function App() {
   // App owns the shared frontend state and passes focused slices into each pane.
+  const [theme, setTheme] = useState<"light" | "dark">(() => {
+    const storedTheme = window.localStorage.getItem("theme");
+    if (storedTheme === "light" || storedTheme === "dark") {
+      return storedTheme;
+    }
+
+    return window.matchMedia("(prefers-color-scheme: dark)").matches
+      ? "dark"
+      : "light";
+  });
   const [documents, setDocuments] = useState<DocumentItem[]>([]);
   const [error, setError] = useState<string | null>(null);
   const [selectedDocId, setSelectedDocId] = useState<string | null>(null);
   const [uiMode, setUiMode] = useState<UiQueryMode>("corpus");
   const [queryText, setQueryText] = useState("");
   const [messages, setMessages] = useState<ChatMessage[]>([]);
-  const [sources, setSources] = useState<QuerySource[]>([]);
   const [queryError, setQueryError] = useState<string | null>(null);
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [isUploading, setIsUploading] = useState(false);
@@ -30,8 +37,6 @@ export default function App() {
   const [deletingDocId, setDeletingDocId] = useState<string | null>(null);
   const [openMenuDocId, setOpenMenuDocId] = useState<string | null>(null);
   const [queryStatus, setQueryStatus] = useState<QueryStatus>("idle");
-  const [resolvedMode, setResolvedMode] = useState<string | null>(null);
-  const [fallbackReason, setFallbackReason] = useState<string | null>(null);
   const abortControllerRef = useRef<AbortController | null>(null);
 
   function updateMessage(
@@ -86,6 +91,12 @@ export default function App() {
       window.removeEventListener("click", handleWindowClick);
     };
   }, []);
+
+  useEffect(() => {
+    document.body.dataset.theme = theme;
+    document.documentElement.style.colorScheme = theme;
+    window.localStorage.setItem("theme", theme);
+  }, [theme]);
 
   useEffect(() => {
     // Keep selection aligned with the current document list.
@@ -146,9 +157,6 @@ export default function App() {
     const assistantMessageId = createMessageId("assistant");
 
     setQueryError(null);
-    setSources([]);
-    setResolvedMode(null);
-    setFallbackReason(null);
     setIsSubmitting(true);
     setQueryStatus("retrieving");
     setQueryText("");
@@ -165,6 +173,7 @@ export default function App() {
         role: "assistant",
         content: "",
         status: "streaming",
+        sources: [],
       },
     ]);
 
@@ -195,9 +204,10 @@ export default function App() {
       await streamQuery(payload, controller.signal, {
         onStart: (data) => {
           // The start event tells us which evidence was chosen before tokens arrive.
-          setSources(data.sources);
-          setResolvedMode(data.mode_used);
-          setFallbackReason(data.fallback_reason);
+          updateMessage(assistantMessageId, (message) => ({
+            ...message,
+            sources: data.sources,
+          }));
           setQueryStatus("generating");
         },
         onToken: (text) => {
@@ -323,35 +333,35 @@ export default function App() {
       <DocumentsPane
         documents={documents}
         selectedDocId={selectedDocId}
-        isUploading={isUploading}
-        uploadError={uploadError}
         error={error}
         deletingDocId={deletingDocId}
         openMenuDocId={openMenuDocId}
         onSelectDocument={setSelectedDocId}
         onDeleteDocument={handleDeleteDocument}
         onToggleMenu={setOpenMenuDocId}
-        onUploadFile={handleUploadFile}
       />
 
       {/* Center pane owns query input, answer display, and query status messaging. */}
       <QueryPane
+        documents={documents}
         messages={messages}
+        theme={theme}
         uiMode={uiMode}
         queryStatus={queryStatus}
-        resolvedMode={resolvedMode}
-        fallbackReason={fallbackReason}
         queryError={queryError}
         queryText={queryText}
         isSubmitting={isSubmitting}
+        isUploading={isUploading}
+        uploadError={uploadError}
         onModeChange={setUiMode}
         onQueryTextChange={setQueryText}
         onSubmit={handleSubmit}
         onStop={handleStop}
+        onToggleTheme={() =>
+          setTheme((currentTheme) => (currentTheme === "light" ? "dark" : "light"))
+        }
+        onUploadFile={handleUploadFile}
       />
-
-      {/* Right pane shows the retrieved evidence chunks that supported the answer. */}
-      <EvidencePane sources={sources} documents={documents} />
     </div>
   );
 }

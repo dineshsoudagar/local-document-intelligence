@@ -34,6 +34,7 @@ export type ChatMessage = {
   role: "user" | "assistant";
   content: string;
   status: "streaming" | "complete" | "error";
+  sources?: QuerySource[];
 };
 
 // Payload sent when starting a new query request.
