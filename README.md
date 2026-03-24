@@ -21,7 +21,7 @@ Documents stay on disk, retrieval runs against a local Qdrant index, and answer 
 Add your demo GIF here.
 
 ```md
-![Demo](./assets/demo.gif)
+![Demo](./demo.gif)
 ```
 
 ## Getting Started
