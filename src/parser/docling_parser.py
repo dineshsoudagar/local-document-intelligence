@@ -18,9 +18,6 @@ class DoclingParser:
     def __init__(self, config: ParserConfig) -> None:
         config.validate()
         self._config = config
-
-        # The text converter is used for normal text extraction.
-        # The enriched converter can include picture-specific outputs.
         self._text_converter = config.build_text_converter()
         self._converter = config.build_converter()
         self._tokenizer = config.build_tokenizer()
@@ -41,8 +38,6 @@ class DoclingParser:
 
         resolved_doc_id = doc_id or f"doc_{uuid.uuid4().hex[:12]}"
 
-        # The enriched document is kept for picture traversal.
-        # The text-only document feeds the normal chunk extraction path.
         enriched_document = self._converter.convert(str(path)).document
         text_document = self._text_converter.convert(str(path)).document
 

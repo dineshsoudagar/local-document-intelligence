@@ -100,7 +100,7 @@ npm -v
 ## Notes
 
 - `launch-app.ps1` expects a built frontend at `frontend/dist/index.html`.
-- `launch-app.ps1` installs `torch==2.10.0` from the official PyTorch CUDA 12.8 wheel index by default.
+- `launch-app.ps1` installs `torch==2.10.0+cu128` from the official PyTorch CUDA 12.8 wheel index by default.
 - Models are stored under the local `models/` directory.
 - `requirements.txt` intentionally does not install `torch` directly. PyTorch is installed separately so the launcher can use the official CUDA wheel instead of a generic pip resolution.
 - If a Hugging Face token is required for any model in your environment, set `HF_TOKEN` before running the downloader.

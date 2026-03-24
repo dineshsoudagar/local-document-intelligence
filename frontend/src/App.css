@@ -151,6 +151,7 @@ h3 {
 
 .center-header-copy p {
   margin: 0;
+  font-size: 12px;
   color: #64748b;
   line-height: 1.5;
 }
@@ -502,9 +503,9 @@ h3 {
 }
 
 .chat-bubble-assistant {
-  background: linear-gradient(180deg, #f1f5f9 0%, #e8eef8 100%);
-  color: #0f172a;
-  border: 1px solid #cfdbe9;
+  background: linear-gradient(180deg, #edf1eb 0%, #e3e8e0 100%);
+  color: #1f2937;
+  border: 1px solid #cfd8cc;
   border-bottom-left-radius: 6px;
 }
 
@@ -651,13 +652,13 @@ h3 {
 
 /* Ask button color */
 .ask-button {
-  background: linear-gradient(135deg, #16a34a 0%, #22c55e 100%);
-  box-shadow: 0 8px 18px rgba(34, 197, 94, 0.18);
+  background: linear-gradient(135deg, #4f6580 0%, #627a95 100%);
+  box-shadow: 0 8px 18px rgba(79, 101, 128, 0.16);
 }
 
 /* Ask button hover state */
 .ask-button:hover:not(:disabled) {
-  box-shadow: 0 10px 22px rgba(34, 197, 94, 0.24);
+  box-shadow: 0 10px 22px rgba(79, 101, 128, 0.22);
 }
 
 /* Stop button color */
@@ -667,12 +668,12 @@ h3 {
 }
 
 .upload-button {
-  background: linear-gradient(135deg, #0f766e 0%, #14b8a6 100%);
-  box-shadow: 0 8px 18px rgba(20, 184, 166, 0.18);
+  background: linear-gradient(135deg, #52716b 0%, #64867f 100%);
+  box-shadow: 0 8px 18px rgba(82, 113, 107, 0.16);
 }
 
 .upload-button:hover:not(:disabled) {
-  box-shadow: 0 10px 22px rgba(20, 184, 166, 0.24);
+  box-shadow: 0 10px 22px rgba(82, 113, 107, 0.22);
 }
 
 /* Stop button hover state */
@@ -799,9 +800,9 @@ body[data-theme="dark"] .chat-window {
 }
 
 body[data-theme="dark"] .chat-bubble-assistant {
-  background: linear-gradient(180deg, rgba(36, 52, 71, 0.88) 0%, rgba(26, 39, 57, 0.92) 100%);
-  color: #dbe7f5;
-  border-color: #32465f;
+  background: linear-gradient(180deg, rgba(58, 74, 66, 0.88) 0%, rgba(43, 57, 50, 0.92) 100%);
+  color: #dce7df;
+  border-color: #4a6055;
   box-shadow: 0 8px 18px rgba(2, 6, 23, 0.24);
 }
 
@@ -809,6 +810,24 @@ body[data-theme="dark"] .chat-bubble-user {
   background: linear-gradient(135deg, rgba(37, 99, 235, 0.58) 0%, rgba(59, 130, 246, 0.48) 100%);
   color: #eff6ff;
   box-shadow: 0 8px 18px rgba(30, 64, 175, 0.18);
+}
+
+body[data-theme="dark"] .ask-button {
+  background: linear-gradient(135deg, #465c75 0%, #58708a 100%);
+  box-shadow: 0 8px 18px rgba(32, 44, 58, 0.28);
+}
+
+body[data-theme="dark"] .ask-button:hover:not(:disabled) {
+  box-shadow: 0 10px 22px rgba(32, 44, 58, 0.36);
+}
+
+body[data-theme="dark"] .upload-button {
+  background: linear-gradient(135deg, #476661 0%, #597a73 100%);
+  box-shadow: 0 8px 18px rgba(28, 40, 37, 0.28);
+}
+
+body[data-theme="dark"] .upload-button:hover:not(:disabled) {
+  box-shadow: 0 10px 22px rgba(28, 40, 37, 0.36);
 }
 
 body[data-theme="dark"] .document-button:hover,

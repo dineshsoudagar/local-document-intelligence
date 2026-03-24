@@ -13,8 +13,9 @@ from src.config.parser_config import ParserConfig
 from src.parser.docling_parser import DoclingParser
 from src.retrieval.qdrant_hybrid_index import QdrantHybridIndex
 
+
 def print_results(results: list, preview_chars: int | None = None) -> None:
-    """Print final retrieval results in a compact debug-friendly format."""
+    """Print final retrieval results in a compact CLI format."""
     if not results:
         print("No results found.")
         return
@@ -46,6 +47,7 @@ def _resolve_pdf_path(value: str) -> Path:
         raise ValueError(f"Only PDF files are supported: {path}")
     return path
 
+
 def main() -> None:
     """Build the index if needed, then run normal or debug search."""
     cli = argparse.ArgumentParser()
@@ -55,26 +57,21 @@ def main() -> None:
     cli.add_argument("--debug", action="store_true")
     args = cli.parse_args()
 
-    # Parser setup for PDF ingestion.
     parser_config = ParserConfig(
         allowed_formats=[InputFormat.PDF],
         enable_picture_description=True,
         include_picture_chunks=True,
     )
     parser = DoclingParser(parser_config)
-
-    # Retrieval engine owns Qdrant, dense embeddings, and reranking.
     index = QdrantHybridIndex(IndexConfig())
 
     pdf_path = _resolve_pdf_path(args.file)
-    # Only parse and build when requested or when no collection exists yet.
     if args.rebuild or not index.collection_exists():
         chunks = parser.parse(pdf_path, doc_id=IndexService.build_doc_id(pdf_path))
         index.build(chunks=chunks, rebuild=args.rebuild)
 
     search_start = time.perf_counter()
 
-    # Debug mode exposes dense, sparse, fused, and reranked stages separately.
     if args.debug:
         debug = index.debug_search(args.query)
 

@@ -147,7 +147,6 @@ class QdrantHybridIndex:
         fused_limit = self._config.fused_top_k
         final_limit = top_k or self._config.final_top_k
 
-        # Prefer the planner-specific rerank instruction when provided.
         instruction = rerank_instruction or self._config.rerank_instruction
 
         dense_query = self._embedder.encode_query(query)
@@ -430,8 +429,6 @@ class QdrantHybridIndex:
             return 0.75, 0.25
 
         sorted_scores = sorted(rerank_scores, reverse=True)
-
-        # Measure separation against the strongest candidate pool only.
         top_n = min(self._config.dynamic_blend_top_n, len(sorted_scores))
         top_scores = sorted_scores[:top_n]
 
@@ -442,7 +439,6 @@ class QdrantHybridIndex:
         top_gap = top1 - top2
         top_vs_mean = top1 - top_mean
 
-        # Increase reranker influence when the top result separates clearly.
         if (
                 top_gap >= self._config.rerank_strong_top_gap
                 and top_vs_mean >= self._config.rerank_strong_top_vs_mean
@@ -455,7 +451,6 @@ class QdrantHybridIndex:
         ):
             return 0.60, 0.40
 
-        # Flat reranker scores favor the fused retrieval score.
         return 0.75, 0.25
 
     @staticmethod

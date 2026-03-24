@@ -34,16 +34,12 @@ class ParserConfig:
     docling_artifacts_path_override: str | None = None
     picture_description_model_override: str | None = None
 
-    max_chunk_tokens: int = 260
-    min_chunk_tokens: int = 80
+    max_chunk_tokens: int = 500
+    min_chunk_tokens: int = 150
 
     allowed_formats: list[InputFormat] = field(
         default_factory=lambda: [
             InputFormat.PDF,
-            #InputFormat.DOCX,
-            #InputFormat.MD,
-            #InputFormat.HTML,
-            #InputFormat.IMAGE,
         ]
     )
 

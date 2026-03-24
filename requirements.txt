@@ -16,3 +16,4 @@ pydantic~=2.12.5
 # Install CUDA-enabled torch separately from the official PyTorch wheel index.
 huggingface_hub
 python-multipart
+fastembed

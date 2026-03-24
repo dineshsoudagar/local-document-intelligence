@@ -177,7 +177,10 @@ export function QueryPane({
       <div className="center-header">
         <div className="center-header-top">
           <div className="center-header-copy">
-            <h2>Chat Workspace</h2>
+            <h2>Local Document Assistant</h2>
+            <p className="center-header-subtitle">
+              Grounded answers over your local documents
+            </p>
           </div>
 
           <button

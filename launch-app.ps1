@@ -5,11 +5,13 @@ param(
     [switch]$SkipRequirementsInstall = $false,
     [switch]$OpenBrowser = $true,
     [string]$TorchVersion = "2.10.0",
+    [string]$TorchVisionVersion = "0.25.0",
+    [string]$TorchAudioVersion = "2.10.0",
     [string]$TorchCudaChannel = "cu128"
 )
 
 $ProjectRoot = $PSScriptRoot
-$VenvDir = Join-Path $ProjectRoot "local_int_venv"
+$VenvDir = Join-Path $ProjectRoot "test_venv"
 $VenvPython = Join-Path $VenvDir "Scripts\python.exe"
 $RequirementsPath = Join-Path $ProjectRoot "requirements.txt"
 $FrontendIndexPath = Join-Path $ProjectRoot "frontend\dist\index.html"
@@ -18,6 +20,8 @@ $HealthUrl = "http://localhost:$Port/healthz"
 $AppUrl = "http://localhost:$Port/"
 $TorchIndexUrl = "https://download.pytorch.org/whl/$TorchCudaChannel"
 $ExpectedTorchVersion = "$TorchVersion+$TorchCudaChannel"
+$ExpectedTorchVisionVersion = "$TorchVisionVersion+$TorchCudaChannel"
+$ExpectedTorchAudioVersion = "$TorchAudioVersion+$TorchCudaChannel"
 
 function Get-SystemPythonCommand {
     $pythonCommand = Get-Command python -ErrorAction SilentlyContinue
@@ -77,39 +81,64 @@ function Test-PortInUse {
     return [bool]$connections
 }
 
-function Wait-AppHealth {
+function Start-BrowserOnReadyJob {
     param(
-        [int]$ProcessId,
         [int]$Attempts = 90,
         [int]$DelaySeconds = 2
     )
 
-    for ($attempt = 0; $attempt -lt $Attempts; $attempt += 1) {
-        if (Test-AppHealth) {
-            return $true
-        }
+    Start-Job `
+        -Name "local-document-intelligence-open-browser-$Port" `
+        -ScriptBlock {
+            param(
+                [string]$BrowserHealthUrl,
+                [string]$BrowserAppUrl,
+                [int]$BrowserAttempts,
+                [int]$BrowserDelaySeconds
+            )
 
-        if ($ProcessId) {
-            $process = Get-Process -Id $ProcessId -ErrorAction SilentlyContinue
-            if (-not $process) {
-                return $false
+            for ($attempt = 0; $attempt -lt $BrowserAttempts; $attempt += 1) {
+                try {
+                    $response = Invoke-RestMethod -Uri $BrowserHealthUrl -Method Get -TimeoutSec 5
+                    if ($response.status -eq "ok") {
+                        Start-Process $BrowserAppUrl
+                        return
+                    }
+                }
+                catch {
+                }
+
+                Start-Sleep -Seconds $BrowserDelaySeconds
             }
-        }
-
-        Start-Sleep -Seconds $DelaySeconds
-    }
-
-    return $false
+        } `
+        -ArgumentList $HealthUrl, $AppUrl, $Attempts, $DelaySeconds | Out-Null
 }
 
-function Get-InstalledTorchVersion {
+function Get-InstalledTorchPackageVersions {
     try {
-        $versionOutput = & $VenvPython -c "import importlib.util, sys; spec = importlib.util.find_spec('torch');`nif spec is None:`n    sys.exit(2)`nimport torch`nprint(torch.__version__)"
+        $versionOutput = & $VenvPython -c "import importlib.metadata, sys;`npkgs = ('torch', 'torchvision', 'torchaudio')`nfor name in pkgs:`n    try:`n        print(f'{name}={importlib.metadata.version(name)}')`n    except importlib.metadata.PackageNotFoundError:`n        sys.exit(2)"
         if ($LASTEXITCODE -ne 0) {
             return $null
         }
 
-        return (($versionOutput | Select-Object -Last 1) -as [string]).Trim()
+        $versions = @{}
+        foreach ($line in $versionOutput) {
+            $entry = ($line -as [string]).Trim()
+            if (-not $entry) {
+                continue
+            }
+
+            $name, $version = $entry -split "=", 2
+            if ($name -and $version) {
+                $versions[$name] = $version
+            }
+        }
+
+        if ($versions.Count -ne 3) {
+            return $null
+        }
+
+        return $versions
     }
     catch {
         return $null
@@ -117,28 +146,37 @@ function Get-InstalledTorchVersion {
 }
 
 function Ensure-TorchInstalled {
-    $installedTorchVersion = Get-InstalledTorchVersion
+    $installedTorchPackages = Get-InstalledTorchPackageVersions
+    $torchPackagesMatch = $installedTorchPackages `
+        -and $installedTorchPackages["torch"] -eq $ExpectedTorchVersion `
+        -and $installedTorchPackages["torchvision"] -eq $ExpectedTorchVisionVersion `
+        -and $installedTorchPackages["torchaudio"] -eq $ExpectedTorchAudioVersion
 
-    if (-not $ForceTorchInstall -and $installedTorchVersion -eq $ExpectedTorchVersion) {
-        Write-Host "CUDA PyTorch $installedTorchVersion is already installed."
+    if (-not $ForceTorchInstall -and $torchPackagesMatch) {
+        Write-Host "CUDA PyTorch packages are already installed: torch $ExpectedTorchVersion, torchvision $ExpectedTorchVisionVersion, torchaudio $ExpectedTorchAudioVersion."
         return
     }
 
-    if ($installedTorchVersion) {
-        Write-Host "Replacing torch $installedTorchVersion with official PyTorch build $ExpectedTorchVersion"
+    if ($installedTorchPackages) {
+        Write-Host ("Replacing torch stack with official CUDA builds. Current versions: " +
+            "torch {0}, torchvision {1}, torchaudio {2}" -f
+            $installedTorchPackages["torch"],
+            $installedTorchPackages["torchvision"],
+            $installedTorchPackages["torchaudio"])
     }
     else {
-        Write-Host "Installing official PyTorch build $ExpectedTorchVersion"
+        Write-Host "Installing official CUDA PyTorch packages from $TorchIndexUrl"
     }
 
     $torchInstallArgs = @(
         "-m", "pip", "install",
-        "--upgrade",
-        "--index-url", $TorchIndexUrl,
-        "torch==$TorchVersion"
+        "torch==$TorchVersion",
+        "torchvision==$TorchVisionVersion",
+        "torchaudio==$TorchAudioVersion",
+        "--index-url", $TorchIndexUrl
     )
 
-    if ($ForceTorchInstall -or $installedTorchVersion) {
+    if ($ForceTorchInstall -or $installedTorchPackages) {
         $torchInstallArgs += "--force-reinstall"
     }
 
@@ -147,12 +185,36 @@ function Ensure-TorchInstalled {
         -Arguments $torchInstallArgs `
         -FailureMessage "Failed to install CUDA-enabled PyTorch from the official PyTorch wheel index."
 
-    $installedTorchVersion = Get-InstalledTorchVersion
-    if ($installedTorchVersion -ne $ExpectedTorchVersion) {
-        throw "PyTorch installation completed, but the installed version is '$installedTorchVersion' instead of '$ExpectedTorchVersion'."
+    $installedTorchPackages = Get-InstalledTorchPackageVersions
+    $torchPackagesMatch = $installedTorchPackages `
+        -and $installedTorchPackages["torch"] -eq $ExpectedTorchVersion `
+        -and $installedTorchPackages["torchvision"] -eq $ExpectedTorchVisionVersion `
+        -and $installedTorchPackages["torchaudio"] -eq $ExpectedTorchAudioVersion
+
+    if (-not $torchPackagesMatch) {
+        $installedSummary = if ($installedTorchPackages) {
+            "torch {0}, torchvision {1}, torchaudio {2}" -f
+                $installedTorchPackages["torch"],
+                $installedTorchPackages["torchvision"],
+                $installedTorchPackages["torchaudio"]
+        }
+        else {
+            "not installed"
+        }
+
+        throw ("PyTorch installation completed, but the installed package set is '{0}' instead of " +
+            "'torch {1}, torchvision {2}, torchaudio {3}'." -f
+            $installedSummary,
+            $ExpectedTorchVersion,
+            $ExpectedTorchVisionVersion,
+            $ExpectedTorchAudioVersion)
     }
 
-    Write-Host "Installed CUDA PyTorch $installedTorchVersion from $TorchIndexUrl"
+    Write-Host ("Installed CUDA PyTorch packages from {0}: torch {1}, torchvision {2}, torchaudio {3}" -f
+        $TorchIndexUrl,
+        $installedTorchPackages["torch"],
+        $installedTorchPackages["torchvision"],
+        $installedTorchPackages["torchaudio"])
 }
 
 if (-not (Test-Path $FrontendIndexPath)) {
@@ -179,12 +241,12 @@ if (-not $SkipRequirementsInstall) {
         -Arguments @("-m", "pip", "install", "--upgrade", "pip") `
         -FailureMessage "Failed to upgrade pip in the virtual environment."
 
-    Ensure-TorchInstalled
-
     Invoke-CheckedCommand `
         -FilePath $VenvPython `
         -Arguments @("-m", "pip", "install", "-r", $RequirementsPath) `
         -FailureMessage "Failed to install Python requirements."
+
+    Ensure-TorchInstalled
 }
 else {
     Ensure-TorchInstalled
@@ -218,24 +280,27 @@ if (Test-PortInUse) {
 }
 
 Write-Host "Starting the application on $AppUrl"
-$serverProcess = Start-Process `
-    -FilePath $VenvPython `
-    -ArgumentList @(
+if ($OpenBrowser) {
+    Start-BrowserOnReadyJob
+}
+
+Write-Host "Application will run in this terminal."
+Write-Host "Press Ctrl+C to stop the server."
+
+Push-Location $ProjectRoot
+try {
+    & $VenvPython @(
         "-m", "uvicorn",
         "src.api.main:app",
         "--host", "localhost",
         "--port", "$Port"
-    ) `
-    -WorkingDirectory $ProjectRoot `
-    -PassThru
+    )
 
-if (-not (Wait-AppHealth -ProcessId $serverProcess.Id)) {
-    throw "The application process started, but the health endpoint did not become ready at $HealthUrl."
+    $serverExitCode = $LASTEXITCODE
+    if ($serverExitCode -ne 0 -and $serverExitCode -ne 130 -and $serverExitCode -ne -1073741510) {
+        throw "The application exited with code $serverExitCode."
+    }
 }
-
-Write-Host "Application is running at $AppUrl"
-Write-Host "Server PID: $($serverProcess.Id)"
-
-if ($OpenBrowser) {
-    Start-Process $AppUrl
+finally {
+    Pop-Location
 }

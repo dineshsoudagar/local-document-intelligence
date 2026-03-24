@@ -196,7 +196,7 @@ class GroundedAnswerService:
                doc_ids: list[str] | None = None, ) -> tuple[StreamStartPayload, Iterator[str]]:
         """Return response metadata and a streamed answer iterator."""
         self._validate_mode(mode)
-
+        print(f"Starting stream for query: {query} with mode: {mode} and doc_ids: {doc_ids}")
         if mode == "chat":
             return self._build_stream_response(
                 query=query,
@@ -206,6 +206,7 @@ class GroundedAnswerService:
                 retrieval_seconds=0.0,
                 fallback_reason=None,
             )
+        
         if doc_ids is None and mode == "auto":
             decision = self._controller.decide(query)
             auto_decision = decision.decision
@@ -220,11 +221,15 @@ class GroundedAnswerService:
                     fallback_reason=reason,
                 )
         
+        print(f"Running retrieval for query: {query} with doc_ids: {doc_ids}")
         retrieved_chunks, retrieval_seconds = self._retrieve_chunks(
                 query,
                 doc_ids=doc_ids,
             )
 
+        print(f"Retrieved {len(retrieved_chunks)} chunks in {retrieval_seconds:.2f} seconds for query: {query}")
+        print(f"Top retrieved chunk metadata: {[chunk.metadata for chunk in retrieved_chunks[:3]]} for query: {query}")
+        print(f"Top retrieved chunk text: {[chunk.text for chunk in retrieved_chunks[:3]]} for query: {query}")
         if not retrieved_chunks:
             start_payload = StreamStartPayload(
                 query=query,
