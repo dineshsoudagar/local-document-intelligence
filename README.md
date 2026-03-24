@@ -10,15 +10,9 @@ Documents stay on disk, retrieval runs against a local Qdrant index, and answer 
 - Build a persistent local knowledge base
 - Search across the full document corpus
 - Restrict search to a single selected document
-- Use hybrid retrieval with dense and sparse search
-- Rerank retrieved evidence before answer generation
 - Generate grounded answers from local models
-- Return partial or unsupported responses when evidence is weak instead of guessing
-- Run through a local FastAPI backend and React frontend
 
 ## Demo
-
-Add your demo GIF here.
 
 <p align="center">
   <img src="demo.gif" App UI Demo " width="90%" style="margin: 1%"/>
@@ -107,7 +101,6 @@ At a high level, the flow is:
 8. Judge whether the evidence is sufficient
 9. Generate either:
    - a grounded supported answer
-   - a partial answer with explicit incompleteness
    - or an unsupported response instead of guessing
 
 ## Tech Stack
@@ -160,22 +153,7 @@ node -v
 npm -v
 ```
 
-If `node` or `npm` is still not found, add the usual Node.js install paths to your user `PATH`:
-
-```powershell
-$nodePaths = @(
-  "$env:ProgramFiles\nodejs",
-  "$env:AppData\npm"
-)
-
-$currentUserPath = [Environment]::GetEnvironmentVariable("Path", "User")
-$missingPaths = $nodePaths | Where-Object { $_ -and ($currentUserPath -notlike "*$_*") }
-
-if ($missingPaths.Count -gt 0) {
-  $updatedPath = ($currentUserPath, $missingPaths -join ";").Trim(";")
-  [Environment]::SetEnvironmentVariable("Path", $updatedPath, "User")
-}
-```
+If `node` or `npm` is still not found, add the usual Node.js install paths to your user `PATH`.
 
 Restart the terminal and verify again:
 
