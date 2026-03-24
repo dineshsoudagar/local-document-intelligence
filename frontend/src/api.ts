@@ -8,10 +8,14 @@ import type {
   QueryStreamStart,
 } from "./types";
 
-const API_BASE_URL = "http://localhost:8000";
+const API_BASE_URL = (import.meta.env.VITE_API_BASE_URL ?? "").replace(/\/$/, "");
+
+function apiUrl(path: string) {
+  return API_BASE_URL ? `${API_BASE_URL}${path}` : path;
+}
 
 export async function fetchDocuments() {
-  const response = await fetch(`${API_BASE_URL}/documents`);
+  const response = await fetch(apiUrl("/documents"));
 
   if (!response.ok) {
     throw new Error(`Request failed: ${response.status}`);
@@ -25,7 +29,7 @@ export async function uploadDocument(file: File) {
   const formData = new FormData();
   formData.append("file", file);
 
-  const response = await fetch(`${API_BASE_URL}/documents/upload`, {
+  const response = await fetch(apiUrl("/documents/upload"), {
     method: "POST",
     body: formData,
   });
@@ -39,7 +43,7 @@ export async function uploadDocument(file: File) {
 }
 
 export async function deleteDocument(docId: string) {
-  const response = await fetch(`${API_BASE_URL}/documents/${docId}`, {
+  const response = await fetch(apiUrl(`/documents/${docId}`), {
     method: "DELETE",
   });
 
@@ -62,7 +66,7 @@ export async function streamQuery(
   signal: AbortSignal,
   handlers: StreamQueryHandlers,
 ) {
-  const response = await fetch(`${API_BASE_URL}/query/stream`, {
+  const response = await fetch(apiUrl("/query/stream"), {
     method: "POST",
     headers: {
       "Content-Type": "application/json",

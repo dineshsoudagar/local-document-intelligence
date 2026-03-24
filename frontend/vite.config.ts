@@ -8,6 +8,12 @@ export default defineConfig({
     host: 'localhost',
     port: 5173,
     strictPort: true,
+    proxy: {
+      '/documents': 'http://localhost:8000',
+      '/query': 'http://localhost:8000',
+      '/health': 'http://localhost:8000',
+      '/healthz': 'http://localhost:8000',
+    },
   },
   preview: {
     host: 'localhost',

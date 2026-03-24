@@ -7,52 +7,66 @@ A fully local document intelligence system for uploading PDFs, indexing them int
 - Stores uploaded documents locally
 - Indexes document chunks for retrieval
 - Runs retrieval and answer generation against local models
-- Serves a FastAPI backend and a Vite/React frontend for interactive use
+- Serves a FastAPI backend and a React frontend
 
 ## Prerequisites
 
 - Python 3.11 or newer
-- Node.js and npm
 - PowerShell
 
-## Quick Start
+## Release Runtime
 
-### 1. Create the environment and install requirements
+For release-style usage, npm is not required at runtime. FastAPI serves the built frontend directly from `frontend/dist`.
 
-The launch script looks for a virtual environment at `local_int_venv`, so keep that name.
-
-```powershell
-python -m venv .\local_int_venv
-.\local_int_venv\Scripts\Activate.ps1
-python -m pip install --upgrade pip
-pip install -r .\requirements.txt
-```
-
-### 2. Download the models
-
-This downloads the configured local models and Docling artifacts into the project `models/` directory.
+Start the app with one command:
 
 ```powershell
-python .\scripts\download_models.py
+powershell -ExecutionPolicy Bypass -File .\launch-app.ps1
 ```
 
-Optional: download only specific assets.
+`launch-app.ps1` will:
+
+- create `.\local_int_venv` if it does not exist
+- install CUDA-enabled `torch` from the official PyTorch wheel index into that environment
+- install `requirements.txt` into that environment
+- download the configured models into `.\models` if they are not already present
+- start the FastAPI app on `http://localhost:8000`
+- open the app in your browser
+
+## Frontend Build
+
+You only need Node.js and npm when you want to build or rebuild the frontend.
+
+Build the frontend once before using `launch-app.ps1`:
 
 ```powershell
-python .\scripts\download_models.py --only embedder reranker generator picture_description docling_artifacts
+Set-Location .\frontend
+npm install
+npm run build
+Set-Location ..
 ```
 
-### Node.js and npm
+That generates the release UI under `frontend/dist`.
 
-`npm` is required. The launch script runs the frontend with `npm.cmd run dev`, so the project will not start fully without Node.js and npm available on `PATH`.
+## Development Mode
 
-Install Node.js LTS on Windows with `winget`:
+If you are editing the frontend, use the dev launcher:
+
+```powershell
+powershell -ExecutionPolicy Bypass -File .\launch-dev.ps1
+```
+
+That mode still requires Node.js and npm because it runs the Vite dev server.
+
+## Optional Node.js Install
+
+If you need to build the frontend, install Node.js LTS on Windows with `winget`:
 
 ```powershell
 winget install OpenJS.NodeJS.LTS
 ```
 
-After installation, open a new terminal and verify:
+Then verify:
 
 ```powershell
 node -v
@@ -76,31 +90,17 @@ if ($missingPaths.Count -gt 0) {
 }
 ```
 
-Then restart the terminal and verify again:
+Restart the terminal and verify again:
 
 ```powershell
 node -v
 npm -v
 ```
 
-### 3. Run the project from the CLI
-
-Install the frontend dependencies once, then start the backend and frontend together with the launch script.
-
-```powershell
-Set-Location .\frontend
-npm install
-Set-Location ..
-powershell -ExecutionPolicy Bypass -File .\launch-dev.ps1
-```
-
-By default the script starts:
-
-- Backend: `http://localhost:8000`
-- Frontend: `http://localhost:5173`
-
 ## Notes
 
-- The launch script prefers `.\local_int_venv\Scripts\python.exe` and falls back to `python` on `PATH` if that virtual environment does not exist.
+- `launch-app.ps1` expects a built frontend at `frontend/dist/index.html`.
+- `launch-app.ps1` installs `torch==2.10.0` from the official PyTorch CUDA 12.8 wheel index by default.
 - Models are stored under the local `models/` directory.
+- `requirements.txt` intentionally does not install `torch` directly. PyTorch is installed separately so the launcher can use the official CUDA wheel instead of a generic pip resolution.
 - If a Hugging Face token is required for any model in your environment, set `HF_TOKEN` before running the downloader.

@@ -13,6 +13,6 @@ qdrant_client~=1.17.1
 fastapi~=0.135.1
 uvicorn
 pydantic~=2.12.5
-torch~=2.10.0+cu128
+# Install CUDA-enabled torch separately from the official PyTorch wheel index.
 huggingface_hub
 python-multipart

@@ -3,8 +3,9 @@ from __future__ import annotations
 from contextlib import asynccontextmanager
 from pathlib import Path
 
-from fastapi import FastAPI
+from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import FileResponse, JSONResponse
 from src.retrieval.qwen_models import LocalQwenGenerator
 from src.api.routes_documents import router as documents_router
 from src.api.routes_health import router as health_router
@@ -15,6 +16,29 @@ from src.config.api_config import ApiConfig
 from src.config.generator_config import GeneratorConfig
 from src.generation.answer_service import GroundedAnswerService
 from src.indexing.index_service import IndexService
+
+
+PROJECT_ROOT = Path(__file__).resolve().parents[2]
+FRONTEND_DIST_DIR = PROJECT_ROOT / "frontend" / "dist"
+FRONTEND_INDEX_PATH = FRONTEND_DIST_DIR / "index.html"
+API_PREFIXES = {"documents", "query", "health", "healthz", "docs", "redoc", "openapi.json"}
+
+
+def _frontend_is_built() -> bool:
+    return FRONTEND_INDEX_PATH.is_file()
+
+
+def _resolve_frontend_file(request_path: str) -> Path | None:
+    if not request_path:
+        return FRONTEND_INDEX_PATH if _frontend_is_built() else None
+
+    dist_dir = FRONTEND_DIST_DIR.resolve()
+    candidate = (dist_dir / request_path).resolve()
+
+    if candidate != dist_dir and dist_dir not in candidate.parents:
+        return None
+
+    return candidate if candidate.is_file() else None
 
 
 @asynccontextmanager
@@ -84,11 +108,36 @@ def create_app() -> FastAPI:
 app = create_app()
 
 
-@app.get("/")
-def root() -> dict[str, str]:
-    return {"message": "Offline Document Intelligence API is running."}
+@app.get("/", include_in_schema=False)
+def root():
+    if _frontend_is_built():
+        return FileResponse(FRONTEND_INDEX_PATH)
+
+    return JSONResponse({"message": "Offline Document Intelligence API is running."})
 
 
 @app.get("/healthz")
 def healthz() -> dict[str, str]:
     return {"status": "ok"}
+
+
+@app.get("/{frontend_path:path}", include_in_schema=False)
+def frontend(frontend_path: str):
+    first_segment = frontend_path.split("/", 1)[0]
+    if first_segment in API_PREFIXES:
+        raise HTTPException(status_code=404, detail="Not found.")
+
+    frontend_file = _resolve_frontend_file(frontend_path)
+    if frontend_file is not None:
+        return FileResponse(frontend_file)
+
+    if _frontend_is_built():
+        return FileResponse(FRONTEND_INDEX_PATH)
+
+    raise HTTPException(
+        status_code=404,
+        detail=(
+            "Built frontend not found. Run 'npm run build' in the frontend directory "
+            "before launching the packaged app."
+        ),
+    )
