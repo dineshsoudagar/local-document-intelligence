@@ -503,9 +503,9 @@ h3 {
 }
 
 .chat-bubble-assistant {
-  background: linear-gradient(180deg, #edf1eb 0%, #e3e8e0 100%);
+  background: linear-gradient(180deg, #f2f6ef 0%, #e8eee5 100%);
   color: #1f2937;
-  border: 1px solid #cfd8cc;
+  border: 1px solid #d5ddd1;
   border-bottom-left-radius: 6px;
 }
 
@@ -652,13 +652,13 @@ h3 {
 
 /* Ask button color */
 .ask-button {
-  background: linear-gradient(135deg, #4f6580 0%, #627a95 100%);
-  box-shadow: 0 8px 18px rgba(79, 101, 128, 0.16);
+  background: linear-gradient(135deg, #5a7290 0%, #6e88a6 100%);
+  box-shadow: 0 8px 18px rgba(90, 114, 144, 0.16);
 }
 
 /* Ask button hover state */
 .ask-button:hover:not(:disabled) {
-  box-shadow: 0 10px 22px rgba(79, 101, 128, 0.22);
+  box-shadow: 0 10px 22px rgba(90, 114, 144, 0.22);
 }
 
 /* Stop button color */
@@ -668,12 +668,12 @@ h3 {
 }
 
 .upload-button {
-  background: linear-gradient(135deg, #52716b 0%, #64867f 100%);
-  box-shadow: 0 8px 18px rgba(82, 113, 107, 0.16);
+  background: linear-gradient(135deg, #5d7d76 0%, #71928a 100%);
+  box-shadow: 0 8px 18px rgba(93, 125, 118, 0.16);
 }
 
 .upload-button:hover:not(:disabled) {
-  box-shadow: 0 10px 22px rgba(82, 113, 107, 0.22);
+  box-shadow: 0 10px 22px rgba(93, 125, 118, 0.22);
 }
 
 /* Stop button hover state */
@@ -800,9 +800,9 @@ body[data-theme="dark"] .chat-window {
 }
 
 body[data-theme="dark"] .chat-bubble-assistant {
-  background: linear-gradient(180deg, rgba(58, 74, 66, 0.88) 0%, rgba(43, 57, 50, 0.92) 100%);
-  color: #dce7df;
-  border-color: #4a6055;
+  background: linear-gradient(180deg, rgba(68, 86, 76, 0.9) 0%, rgba(52, 68, 60, 0.94) 100%);
+  color: #e1ebe3;
+  border-color: #567064;
   box-shadow: 0 8px 18px rgba(2, 6, 23, 0.24);
 }
 
@@ -813,21 +813,21 @@ body[data-theme="dark"] .chat-bubble-user {
 }
 
 body[data-theme="dark"] .ask-button {
-  background: linear-gradient(135deg, #465c75 0%, #58708a 100%);
-  box-shadow: 0 8px 18px rgba(32, 44, 58, 0.28);
+  background: linear-gradient(135deg, #506884 0%, #64809d 100%);
+  box-shadow: 0 8px 18px rgba(36, 48, 64, 0.28);
 }
 
 body[data-theme="dark"] .ask-button:hover:not(:disabled) {
-  box-shadow: 0 10px 22px rgba(32, 44, 58, 0.36);
+  box-shadow: 0 10px 22px rgba(36, 48, 64, 0.36);
 }
 
 body[data-theme="dark"] .upload-button {
-  background: linear-gradient(135deg, #476661 0%, #597a73 100%);
-  box-shadow: 0 8px 18px rgba(28, 40, 37, 0.28);
+  background: linear-gradient(135deg, #53746d 0%, #688a82 100%);
+  box-shadow: 0 8px 18px rgba(30, 43, 40, 0.28);
 }
 
 body[data-theme="dark"] .upload-button:hover:not(:disabled) {
-  box-shadow: 0 10px 22px rgba(28, 40, 37, 0.36);
+  box-shadow: 0 10px 22px rgba(30, 43, 40, 0.36);
 }
 
 body[data-theme="dark"] .document-button:hover,

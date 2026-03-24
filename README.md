@@ -1,41 +1,115 @@
 # local-document-intelligence
 
-A fully local document intelligence system for uploading PDFs, indexing them into a private knowledge base, and querying them through a local retrieval-augmented generation pipeline.
+A fully local document intelligence system for building a private document workspace with persistent indexing, hybrid retrieval, reranking, and grounded answer generation over local models.
 
-## What It Does
+This repository is aimed at a real local workflow. Documents stay on disk, retrieval runs against a local Qdrant index, and answer generation runs through locally loaded models.
 
-- Stores uploaded documents locally
-- Indexes document chunks for retrieval
-- Runs retrieval and answer generation against local models
-- Serves a FastAPI backend and a React frontend
+## Query Modes
 
-## Prerequisites
+The application currently exposes four practical query modes.
+
+### Auto
+
+Auto mode decides whether a query should be handled as normal assistant chat or as document-grounded retrieval.
+
+Use this when you do not want to manually choose between free chat and document search. The system first classifies the request. If the query looks like a normal conversational or meta request, it answers directly. If the query needs document evidence, it runs retrieval instead.
+
+### Chat
+
+Chat mode skips retrieval and answers directly as a local assistant.
+
+Use this for general interaction, system questions, or messages that do not require document evidence. This mode is intentionally separate from grounded search so conversational requests do not pay retrieval cost unnecessarily.
+
+### Corpus
+
+Corpus mode searches across the full indexed knowledge base.
+
+Use this when the answer may be spread across multiple uploaded documents or when you want the system to search the entire local corpus. This is the default grounded search behavior when no specific document is selected.
+
+### Single Document
+
+Single document mode restricts retrieval to one selected document.
+
+Use this when you want the answer to come only from one document instead of the full corpus. This is useful for focused review, contract inspection, paper reading, and situations where cross-document mixing would be undesirable.
+
+## Runtime Design
+
+The system is built around a controlled local retrieval pipeline instead of a single vector lookup.
+
+At a high level, the runtime flow is:
+
+1. parse the uploaded document into chunks
+2. store chunk text and metadata locally
+3. index chunks into a local Qdrant collection
+4. retrieve candidates with dense and sparse search
+5. fuse retrieval results
+6. rerank the fused candidates
+7. build grounded context from the strongest evidence
+8. judge whether the evidence is sufficient
+9. generate either:
+   - a grounded supported answer
+   - a partial answer with explicit incompleteness
+   - or an unsupported response instead of bluffing
+
+The retrieval layer is not dense-only. It uses dense search, sparse BM25-style search, reciprocal-rank fusion, reranking, and a bounded second pass when early evidence is weak.
+
+## Technical Characteristics
+
+- Local Qdrant storage for persistent indexing
+- Hybrid retrieval using dense embeddings and sparse BM25-style search
+- Reranker-based final evidence selection
+- Evidence judgment before final answer generation
+- Selected-document filtering when a single document is chosen
+- Local FastAPI backend
+- React frontend
+- Release runtime serves the built frontend directly from `frontend/dist`
+
+## Models
+
+Current default model stack:
+
+- Dense embeddings: `Qwen/Qwen3-Embedding-0.6B`
+- Reranking: `Qwen/Qwen3-Reranker-0.6B`
+- Answer generation: `Qwen/Qwen3-4B-Instruct-2507`
+- Sparse retrieval: `Qdrant/bm25`
+
+Models are stored locally under `models/`.
+
+## Runtime Requirements
+
+### Prerequisites
 
 - Python 3.11 or newer
 - PowerShell
+
+### Current hardware target
+
+The current setup is aimed at machines with at least **8 GB VRAM** for a comfortable local run with the present model stack.
+
+This is not yet tuned for low-end PCs. Lower-memory support is planned as part of the next round of optimization work.
 
 ## Release Runtime
 
 For release-style usage, npm is not required at runtime. FastAPI serves the built frontend directly from `frontend/dist`.
 
-Start the app with one command:
+Start the application with:
 
 ```powershell
 powershell -ExecutionPolicy Bypass -File .\launch-app.ps1
 ```
 
-`launch-app.ps1` will:
+`launch-app.ps1` is expected to:
 
-- create `.\local_int_venv` if it does not exist
-- install CUDA-enabled `torch` from the official PyTorch wheel index into that environment
-- install `requirements.txt` into that environment
-- download the configured models into `.\models` if they are not already present
+- create `./local_int_venv` if it does not already exist
+- install CUDA-enabled `torch` into that environment
+- install `requirements.txt`
+- download configured models into `./models` if missing
 - start the FastAPI app on `http://localhost:8000`
-- open the app in your browser
+- open the application in the browser
 
 ## Frontend Build
 
-You only need Node.js and npm when you want to build or rebuild the frontend.
+Node.js and npm are only required when building or rebuilding the frontend.
 
 Build the frontend once before using `launch-app.ps1`:
 
@@ -46,21 +120,21 @@ npm run build
 Set-Location ..
 ```
 
-That generates the release UI under `frontend/dist`.
+This generates the release frontend under `frontend/dist`.
 
 ## Development Mode
 
-If you are editing the frontend, use the dev launcher:
+If you are editing the frontend, use:
 
 ```powershell
 powershell -ExecutionPolicy Bypass -File .\launch-dev.ps1
 ```
 
-That mode still requires Node.js and npm because it runs the Vite dev server.
+This mode requires Node.js and npm because it runs the Vite development server.
 
 ## Optional Node.js Install
 
-If you need to build the frontend, install Node.js LTS on Windows with `winget`:
+If you need Node.js on Windows, install the LTS version with:
 
 ```powershell
 winget install OpenJS.NodeJS.LTS
@@ -73,7 +147,7 @@ node -v
 npm -v
 ```
 
-If `node` or `npm` is still not found, add the standard Node.js install locations to your user `PATH`:
+If `node` or `npm` is still not found, add the usual Node.js install paths to your user `PATH`:
 
 ```powershell
 $nodePaths = @(
@@ -97,10 +171,13 @@ node -v
 npm -v
 ```
 
-## Notes
+## Upcoming Features
 
-- `launch-app.ps1` expects a built frontend at `frontend/dist/index.html`.
-- `launch-app.ps1` installs `torch==2.10.0+cu128` from the official PyTorch CUDA 12.8 wheel index by default.
-- Models are stored under the local `models/` directory.
-- `requirements.txt` intentionally does not install `torch` directly. PyTorch is installed separately so the launcher can use the official CUDA wheel instead of a generic pip resolution.
-- If a Hugging Face token is required for any model in your environment, set `HF_TOKEN` before running the downloader.
+Planned next improvements include:
+
+- DOCX support
+- image-aware document support
+- better support for low-end PCs
+- lower-memory runtime options
+- more packaging and deployment polish
+- continued refinement of corpus and single-document workflows

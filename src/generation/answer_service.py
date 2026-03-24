@@ -228,8 +228,6 @@ class GroundedAnswerService:
             )
 
         print(f"Retrieved {len(retrieved_chunks)} chunks in {retrieval_seconds:.2f} seconds for query: {query}")
-        print(f"Top retrieved chunk metadata: {[chunk.metadata for chunk in retrieved_chunks[:3]]} for query: {query}")
-        print(f"Top retrieved chunk text: {[chunk.text for chunk in retrieved_chunks[:3]]} for query: {query}")
         if not retrieved_chunks:
             start_payload = StreamStartPayload(
                 query=query,

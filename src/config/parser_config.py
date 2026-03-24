@@ -34,8 +34,8 @@ class ParserConfig:
     docling_artifacts_path_override: str | None = None
     picture_description_model_override: str | None = None
 
-    max_chunk_tokens: int = 500
-    min_chunk_tokens: int = 150
+    max_chunk_tokens: int = 256
+    min_chunk_tokens: int = 60
 
     allowed_formats: list[InputFormat] = field(
         default_factory=lambda: [

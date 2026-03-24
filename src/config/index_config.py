@@ -43,9 +43,9 @@ class IndexConfig:
     rerank_batch_size: int = 4
     reranker_max_length: int = 4096
 
-    dense_top_k: int = 30
-    sparse_top_k: int = 30
-    fused_top_k: int = 30
+    dense_top_k: int = 20
+    sparse_top_k: int = 20
+    fused_top_k: int = 20
     final_top_k: int = 10
 
     use_dynamic_blend: bool = True
