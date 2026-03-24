@@ -1,37 +1,43 @@
-# local-document-intelligence
+# 📚 local-document-intelligence
 
 A fully local document intelligence system for building a private document workspace with persistent indexing, hybrid retrieval, reranking, and grounded answer generation over local models.
 
 Documents stay on disk, retrieval runs against a local Qdrant index, and answer generation runs through locally loaded models.
 
-## Features
+---
 
-- Upload and store PDF documents locally
-- Build a persistent local knowledge base
-- Search across the full document corpus
-- Restrict search to a single selected document
-- Generate grounded answers from local models
+## ✨ Features
 
-## Demo
+- 📄 Upload and store PDF documents locally
+- 🗂️ Build a persistent local knowledge base
+- 🔎 Search across the full document corpus
+- 📑 Restrict search to a single selected document
+- 🧠 Generate grounded answers from local models
+
+---
+
+## 🎬 Demo
 
 <p align="center">
-  <img src="demo.gif" App UI Demo " width="90%" style="margin: 1%"/>
+  <img src="demo.gif" alt="App UI Demo" width="90%" style="margin: 1%;" />
 </p>
 
-## Getting Started
+---
 
-### Requirements
+## 🚀 Getting Started
+
+### 📋 Requirements
 
 - Python 3.11 or newer
 - PowerShell
 
-### Hardware
+### 💻 Hardware
 
 The current setup is aimed at machines with at least **8 GB VRAM** for a comfortable local run with the present model stack.
 
 This is not yet tuned for low-end PCs. Lower-memory support is planned in a later iteration.
 
-### Run the application
+### ▶️ Run the application
 
 Start the app with:
 
@@ -48,33 +54,37 @@ The launch script is expected to:
 - start the FastAPI app on `http://localhost:8000`
 - open the application in the browser
 
-## Query Modes
+---
 
-### Auto
+## 🔀 Query Modes
+
+### 🤖 Auto
 
 Auto mode decides whether a query should be handled as normal assistant chat or as document-grounded retrieval.
 
 Use this when you do not want to manually choose between free chat and document search.
 
-### Chat
+### 💬 Chat
 
 Chat mode skips retrieval and answers directly as a local assistant.
 
 Use this for general interaction, system questions, or messages that do not require document evidence.
 
-### Corpus
+### 🌐 Corpus
 
 Corpus mode searches across the full indexed knowledge base.
 
 Use this when the answer may be spread across multiple uploaded documents or when you want to search the entire local corpus.
 
-### Single Document
+### 📄 Single Document
 
 Single document mode restricts retrieval to one selected document.
 
 Use this when you want the answer to come only from one document instead of the full corpus.
 
-## Models
+---
+
+## 🧠 Models
 
 Current default model stack:
 
@@ -85,7 +95,9 @@ Current default model stack:
 
 All models are stored locally under `models/`.
 
-## How It Works
+---
+
+## ⚙️ How It Works
 
 The system uses a local retrieval pipeline instead of a single vector lookup.
 
@@ -103,7 +115,9 @@ At a high level, the flow is:
    - a grounded supported answer
    - or an unsupported response instead of guessing
 
-## Tech Stack
+---
+
+## 🏗️ Tech Stack
 
 - Backend: FastAPI
 - Frontend: React
@@ -111,13 +125,15 @@ At a high level, the flow is:
 - Parsing: Docling
 - Local models: Qwen embedding, reranker, and generator models
 
-## Frontend Development
+---
+
+## 🛠️ Frontend Development
 
 The built frontend is already used for normal application startup.
 
 Only rebuild the frontend if you are editing the UI.
 
-### Run in development mode
+### 🔧 Run in development mode
 
 ```powershell
 powershell -ExecutionPolicy Bypass -File .\launch-dev.ps1
@@ -125,7 +141,7 @@ powershell -ExecutionPolicy Bypass -File .\launch-dev.ps1
 
 This mode requires Node.js and npm because it runs the Vite development server.
 
-### Rebuild the frontend
+### 🏗️ Rebuild the frontend
 
 ```powershell
 Set-Location .\frontend
@@ -136,7 +152,9 @@ Set-Location ..
 
 This generates the production frontend under `frontend/dist`.
 
-## Installing Node.js
+---
+
+## 📦 Installing Node.js
 
 Node.js and npm are only required when developing or rebuilding the frontend.
 
@@ -162,7 +180,9 @@ node -v
 npm -v
 ```
 
-## Planned Improvements
+---
+
+## 🔭 Planned Improvements
 
 - DOCX support
 - Image-aware document support
