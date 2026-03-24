@@ -181,6 +181,9 @@ def stream_query_documents(
     answer_service: GroundedAnswerService = Depends(get_answer_service_from_state),
     registry: DocumentRegistry = Depends(get_document_registry_from_state),
 ) -> StreamingResponse:
+    print(f"Received query: {request.query}")
+    print(f"Received mode: {request.mode}")
+    print(f"Received doc_ids: {request.doc_ids}")
     # Build the retrieval + generation stream before starting the HTTP response
     try:
         start_payload, token_stream = answer_service.stream(

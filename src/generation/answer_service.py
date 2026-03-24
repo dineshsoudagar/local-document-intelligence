@@ -12,9 +12,14 @@ from src.generation.context_builder import (
     GroundedContext,
     build_grounded_context,
 )
+from src.config.retrieval_control_config import (
+    EvidenceVerdict,
+    RetrievalControlConfig,
+    RetrievalMode,
+)
 from src.retrieval.qdrant_hybrid_index import QdrantHybridIndex, RetrievedChunk
 from src.retrieval.qwen_models import LocalQwenGenerator
-
+from src.retrieval.controller_service import AutoDecisionController
 
 @dataclass(slots=True)
 class AnswerTimings:
@@ -96,7 +101,11 @@ class GroundedAnswerService:
         self._index = index
         self._config = config
         self._generator = generator
-
+        self._retrieval_config = RetrievalControlConfig()
+        self._controller = AutoDecisionController(
+            generator=self.generator,
+            config=self._retrieval_config.auto,
+        )
     @property
     def generator(self) -> LocalQwenGenerator:
         """Return a lazily initialized local generator."""
@@ -199,22 +208,39 @@ class GroundedAnswerService:
                 retrieval_seconds=0.0,
                 fallback_reason=None,
             )
+        if doc_ids is None and mode == "auto":
+            decision = self._controller.decide(query)
+            auto_decision = decision.decision
+            auto_confidence = decision.confidence
+            reason = decision.reason_short
 
+            print(
+                    "[auto] query=%r decision=%s confidence=%.3f reason=%s"
+                    % (query, decision.decision, decision.confidence, decision.reason_short)
+                )
+
+
+            #print(f"Resolved mode: {resolved_mode}, Fallback reason: {fallback_reason}")
+            if auto_decision == "chat":
+                return self._build_stream_response(
+                    query=query,
+                    mode_used="chat",
+                    context=self._empty_context(),
+                    retrieved_chunk_count=0,
+                    retrieval_seconds=0.0,
+                    fallback_reason=reason,
+                )
+        
         retrieved_chunks, retrieval_seconds = self._retrieve_chunks(
-            query,
-            doc_ids=doc_ids,
-        )
-        resolved_mode, fallback_reason = self._resolve_mode(mode, retrieved_chunks)
-
-        if resolved_mode == "chat":
-            return self._build_stream_response(
-                query=query,
-                mode_used="chat",
-                context=self._empty_context(),
-                retrieved_chunk_count=len(retrieved_chunks),
-                retrieval_seconds=retrieval_seconds,
-                fallback_reason=fallback_reason,
+                query,
+                doc_ids=doc_ids,
             )
+                    #resolved_mode, fallback_reason = self._resolve_mode(mode, retrieved_chunks)
+        print("recived mode:", mode)
+        print(f"Retrieved {len(retrieved_chunks)} chunks in {retrieval_seconds:.2f} seconds")
+        print(f"Chunk fused_score: {[chunk.fused_score for chunk in retrieved_chunks]}")
+        print(f"Chunk rerank_score: {[chunk.rerank_score for chunk in retrieved_chunks]}")
+        print(f"Chunk final_score: {[chunk.final_score for chunk in retrieved_chunks]}")
 
         if not retrieved_chunks:
             start_payload = StreamStartPayload(

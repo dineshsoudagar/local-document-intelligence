@@ -40,7 +40,9 @@ class QwenDenseEmbedder:
     @property
     def dimension(self) -> int:
         """Return the embedding dimensionality."""
-        return int(self._model.get_sentence_embedding_dimension())
+        dim = self._model.get_sentence_embedding_dimension()
+        assert dim is not None, "Embedding dimension should not be None"
+        return int(dim)
 
     def encode_documents(self, texts: Sequence[str]) -> list[list[float]]:
         """Encode document texts into normalized dense embeddings."""
@@ -477,3 +479,114 @@ class LocalQwenGenerator:
         """Remove visible reasoning tags if the model emits them."""
         cleaned = re.sub(r"<think>.*?</think>", "", text, flags=re.DOTALL | re.IGNORECASE)
         return cleaned.strip()
+
+    def generate_structured_json(
+        self,
+        *,
+        system_prompt: str,
+        user_prompt: str,
+        max_new_tokens: int,
+        temperature: float = 0.0,
+        top_p: float = 1.0,
+        repetition_penalty: float = 1.0,
+    ) -> dict[str, Any]:
+        """Generate a JSON object from the model and parse the first valid object found."""
+
+        prompt = self.build_messages_prompt(
+            system_prompt=system_prompt,
+            user_prompt=user_prompt,
+        )
+        text = self.generate_from_prompt(
+            prompt,
+            max_new_tokens=max_new_tokens,
+            temperature=temperature,
+            top_p=top_p,
+            repetition_penalty=repetition_penalty,
+        )
+        return self._extract_json(text)
+    
+    def build_messages_prompt(
+        self,
+        *,
+        system_prompt: str,
+        user_prompt: str,
+    ) -> str:
+        """Build a generic chat-form prompt from explicit system and user content."""
+
+        messages = [
+            {
+                "role": "system",
+                "content": system_prompt,
+            },
+            {
+                "role": "user",
+                "content": user_prompt,
+            },
+        ]
+
+        if hasattr(self._tokenizer, "apply_chat_template"):
+            return self._tokenizer.apply_chat_template(
+                messages,
+                tokenize=False,
+                add_generation_prompt=True,
+            )
+
+        return (
+            "System:\n"
+            f"{system_prompt}\n\n"
+            "User:\n"
+            f"{user_prompt}\n\n"
+            "Assistant:\n"
+        )
+    
+    @staticmethod
+    def _extract_json(text: str) -> dict[str, Any]:
+        """Extract and parse the first top-level JSON object from model output."""
+
+        start = text.find("{")
+        if start < 0:
+            raise ValueError("Model output does not contain a JSON object")
+
+        depth = 0
+        end = -1
+        in_string = False
+        escape = False
+
+        for index in range(start, len(text)):
+            char = text[index]
+
+            if in_string:
+                if escape:
+                    escape = False
+                elif char == "\\":
+                    escape = True
+                elif char == '"':
+                    in_string = False
+                continue
+
+            if char == '"':
+                in_string = True
+                continue
+
+            if char == "{":
+                depth += 1
+            elif char == "}":
+                depth -= 1
+                if depth == 0:
+                    end = index + 1
+                    break
+
+        if end < 0:
+            raise ValueError("Model output contains an incomplete JSON object")
+
+        candidate = text[start:end]
+        try:
+            import json
+
+            payload = json.loads(candidate)
+        except Exception as exc:
+            raise ValueError("Failed to parse JSON from model output") from exc
+
+        if not isinstance(payload, dict):
+            raise ValueError("Structured output must be a JSON object")
+        return payload
