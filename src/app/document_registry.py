@@ -1,3 +1,5 @@
+"""SQLite-backed document registry models and persistence helpers."""
+
 from __future__ import annotations
 
 import sqlite3
@@ -233,6 +235,7 @@ class DocumentRegistry:
         )
 
     def mark_pending(self, *, doc_id: str) -> None:
+        """Mark a document as pending reindexing."""
         with self._connect() as connection:
             connection.execute(
                 """

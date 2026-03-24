@@ -1,3 +1,5 @@
+"""Controller logic for deciding chat-versus-retrieval behavior."""
+
 from __future__ import annotations
 
 from dataclasses import dataclass

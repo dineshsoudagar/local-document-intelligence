@@ -1,13 +1,11 @@
-from __future__ import annotations
-
-from src.utils.io import resolve_pdf_path
-
 """CLI entrypoint for index lifecycle operations."""
+
+from __future__ import annotations
 
 import argparse
 
 from src.indexing.index_service import IndexService
-from pathlib import Path
+from src.utils.io import resolve_pdf_path
 
 
 def parse_args() -> argparse.Namespace:

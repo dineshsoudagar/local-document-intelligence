@@ -1,8 +1,8 @@
+"""Local Qwen model wrappers for embedding, reranking, and grounded generation."""
+
 from __future__ import annotations
 
 from pathlib import Path
-
-"""Local Qwen model wrappers for embedding, reranking, and grounded generation."""
 
 import re
 from typing import Any, Iterator, Sequence

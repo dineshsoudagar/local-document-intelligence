@@ -43,7 +43,7 @@ def _resolve_frontend_file(request_path: str) -> Path | None:
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    # Create and prepare storage folders
+    """Initialize shared services at startup and clean them up at shutdown."""
     paths = AppPaths(base_dir=Path("storage"))
     paths.ensure_exists()
 
@@ -81,7 +81,7 @@ async def lifespan(app: FastAPI):
 
 
 def create_app() -> FastAPI:
-    # Create the FastAPI app
+    """Create and configure the FastAPI application instance."""
     api_config = ApiConfig()
     app = FastAPI(
         title="Offline Document Intelligence API",

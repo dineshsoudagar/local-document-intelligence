@@ -1,8 +1,16 @@
+"""Query API routes for buffered and streaming answer generation."""
+
+from __future__ import annotations
+
+import json
+import time
+from collections.abc import Iterator
+from pathlib import Path
 from typing import cast
 
 from fastapi import APIRouter, Depends, HTTPException, status
 from fastapi.responses import StreamingResponse
-import json
+
 from src.api.app_state import (
     get_answer_service_from_state,
     get_document_registry_from_state,
@@ -11,14 +19,12 @@ from src.api.query_models import QueryRequest, QueryResponse
 from src.app.document_registry import DocumentRegistry
 from src.generation.answer_service import GroundedAnswerService
 
-import json
-import time
-from collections.abc import Iterator
-from pathlib import Path
+
 router = APIRouter()
 
 
 def _event_line(event_type: str, data: object) -> bytes:
+    """Serialize one NDJSON event line for the streaming response."""
     return (json.dumps({"type": event_type, "data": data}, ensure_ascii=False) + "\n").encode("utf-8")
 
 
@@ -26,25 +32,21 @@ def _attach_original_filenames(
     sources: list[dict[str, object]],
     registry: DocumentRegistry,
 ) -> list[dict[str, object]]:
-    # Cache document lookups so repeated chunks from the same document do not hit SQLite repeatedly
+    """Attach uploaded filenames to raw source payloads when a registry match exists."""
     original_filename_by_doc_id: dict[str, str | None] = {}
 
     for source in sources:
         doc_id = _resolve_source_doc_id(source)
-
-        # Sources without doc_id cannot be joined to the registry
         if not doc_id:
             source["original_filename"] = None
             continue
 
-        # Load the uploaded filename once per document id
         if doc_id not in original_filename_by_doc_id:
             record = registry.get_document(doc_id)
             original_filename_by_doc_id[doc_id] = (
                 record.original_filename if record is not None else None
             )
 
-        # Attach the real uploaded filename for frontend display
         source["original_filename"] = original_filename_by_doc_id[doc_id]
 
     return sources
@@ -57,7 +59,6 @@ def _expand_pages(source: dict[str, object]) -> list[int]:
 
     if page_start_value is None and page_end_value is None:
         return []
-
     if page_start_value is None:
         page_start_value = page_end_value
     if page_end_value is None:
@@ -123,11 +124,7 @@ def _collapse_sources_to_references(
 
 
 def _resolve_source_doc_id(source: dict[str, object]) -> str | None:
-    """Resolve a registry doc_id from the source payload.
-
-    Older indexed chunks may be missing `doc_id` in their stored payload while still
-    exposing the managed filename like `doc_<hash>.pdf` as `source_file`.
-    """
+    """Resolve a registry doc_id from a source payload."""
     doc_id_value = source.get("doc_id")
     if doc_id_value:
         return str(doc_id_value)
@@ -149,6 +146,7 @@ def query_documents(
     answer_service: GroundedAnswerService = Depends(get_answer_service_from_state),
     registry: DocumentRegistry = Depends(get_document_registry_from_state),
 ) -> QueryResponse:
+    """Run a non-streaming grounded query and return the final answer payload."""
     try:
         result = answer_service.answer(
             query=request.query,
@@ -166,12 +164,8 @@ def query_documents(
             detail=f"Query failed: {exc}",
         ) from exc
 
-    # Convert the answer result into a mutable payload
     payload = result.to_dict()
-
-    # Replace managed storage names with the real uploaded filenames when possible
     payload["sources"] = _collapse_sources_to_references(payload["sources"], registry)
-
     return QueryResponse.model_validate(payload)
 
 
@@ -181,70 +175,45 @@ def stream_query_documents(
     answer_service: GroundedAnswerService = Depends(get_answer_service_from_state),
     registry: DocumentRegistry = Depends(get_document_registry_from_state),
 ) -> StreamingResponse:
-    print(f"Received query: {request.query}")
-    print(f"Received mode: {request.mode}")
-    print(f"Received doc_ids: {request.doc_ids}")
-    # Build the retrieval + generation stream before starting the HTTP response
+    """Stream query output as NDJSON events."""
     try:
         start_payload, token_stream = answer_service.stream(
             query=request.query,
             mode=request.mode,
             doc_ids=request.doc_ids,
         )
-
-    # Invalid user input or unsupported mode becomes HTTP 400
     except ValueError as exc:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail=str(exc),
         ) from exc
-
-    # Any unexpected backend failure becomes HTTP 500
     except Exception as exc:
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail=f"Query failed: {exc}",
         ) from exc
 
-    # This generator produces the NDJSON response line by line
     def body() -> Iterator[bytes]:
-        # Collect streamed text so the final event can include the full answer
+        """Yield the NDJSON event stream for one query."""
         answer_parts: list[str] = []
-
-        # Measure generation time separately from retrieval time
         generation_started_at = time.perf_counter()
 
-        # Convert the stream start payload into a mutable dictionary
         start_data = start_payload.to_dict()
-
-        # Replace managed storage names with the real uploaded filenames when possible
         start_data["sources"] = _collapse_sources_to_references(start_data["sources"], registry)
-
-        # Send initial metadata before token streaming starts
         yield _event_line("start", start_data)
 
         try:
-            # Stream each generated text piece from the answer service
             for text_piece in token_stream:
-                # Ignore empty text pieces if the generator yields them
                 if not text_piece:
                     continue
 
-                # Save the text so the complete answer can be reconstructed later
                 answer_parts.append(text_piece)
-
-                # Send one streamed token event to the frontend
                 yield _event_line("token", {"text": text_piece})
-
-        # If generation fails after streaming started, send an error event in-band
         except Exception as exc:
             yield _event_line("error", {"message": f"Query failed: {exc}"})
             return
 
-        # Compute generation duration once token streaming is complete
         generation_seconds = time.perf_counter() - generation_started_at
-
-        # Send the final event with the full answer and timing breakdown
         yield _event_line(
             "done",
             {
@@ -257,7 +226,6 @@ def stream_query_documents(
             },
         )
 
-    # Return a streaming HTTP response instead of one buffered JSON object
     return StreamingResponse(
         body(),
         media_type="application/x-ndjson",

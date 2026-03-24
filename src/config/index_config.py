@@ -1,6 +1,6 @@
-from __future__ import annotations
-
 """Index configuration for local retrieval models, storage, and ranking limits."""
+
+from __future__ import annotations
 
 from dataclasses import dataclass, field
 from pathlib import Path

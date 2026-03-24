@@ -1,3 +1,5 @@
+"""Index lifecycle helpers for local document ingestion and reindexing."""
+
 from __future__ import annotations
 
 import hashlib

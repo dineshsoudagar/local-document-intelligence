@@ -1,15 +1,19 @@
+"""Inspect and optionally export parser chunk output for one PDF."""
+
 from __future__ import annotations
 
 import argparse
 from pathlib import Path
 
-from src.config.parser_config import ParserConfig
-from src.utils.io import write_json, resolve_pdf_path
-from src.parser.docling_parser import DoclingParser
 from docling.datamodel.base_models import InputFormat
+
+from src.config.parser_config import ParserConfig
+from src.parser.docling_parser import DoclingParser
+from src.utils.io import resolve_pdf_path, write_json
 
 
 def inspect_chunks(chunks: list, limit: int = 5, preview_chars: int = 700) -> None:
+    """Print a compact preview of parsed chunks."""
     for chunk in chunks[:limit]:
         print("=" * 100)
         print(f"chunk_id   : {chunk.chunk_id}")
@@ -22,6 +26,7 @@ def inspect_chunks(chunks: list, limit: int = 5, preview_chars: int = 700) -> No
 
 
 def main() -> None:
+    """Run chunk inspection for a single PDF."""
     cli = argparse.ArgumentParser()
     cli.add_argument("--file", required=True, help="Path to the PDF file")
     cli.add_argument("--chunk-size", type=int, default=200)
