@@ -25,9 +25,10 @@ export default function App() {
       : "light";
   });
   const [documents, setDocuments] = useState<DocumentItem[]>([]);
+  const [isFetchingDocuments, setIsFetchingDocuments] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const [selectedDocId, setSelectedDocId] = useState<string | null>(null);
-  const [uiMode, setUiMode] = useState<UiQueryMode>("corpus");
+  const [selectedDocIds, setSelectedDocIds] = useState<string[]>([]);
+  const [uiMode, setUiMode] = useState<UiQueryMode>("auto");
   const [queryText, setQueryText] = useState("");
   const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [queryError, setQueryError] = useState<string | null>(null);
@@ -54,19 +55,75 @@ export default function App() {
     return `${prefix}-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
   }
 
+  function wait(ms: number) {
+    return new Promise((resolve) => window.setTimeout(resolve, ms));
+  }
+
+  async function fetchAndStoreDocuments() {
+    const items = await fetchDocuments();
+    setDocuments(items);
+    return items;
+  }
+
+  async function fetchDocumentsWithRetry() {
+    let lastError: unknown = null;
+
+    for (let attempt = 0; attempt < 10; attempt += 1) {
+      try {
+        return await fetchAndStoreDocuments();
+      } catch (err) {
+        lastError = err;
+        if (attempt < 9) {
+          await wait(1000);
+        }
+      }
+    }
+
+    throw lastError instanceof Error ? lastError : new Error("Failed to fetch documents");
+  }
+
   // Pull the latest uploaded documents from the backend so the left pane stays in sync.
   async function loadDocuments() {
+    setIsFetchingDocuments(true);
     try {
       setError(null);
-      const items = await fetchDocuments();
-      setDocuments(items);
+      await fetchDocumentsWithRetry();
     } catch (err) {
       if (err instanceof Error) {
         setError(err.message);
       } else {
-        setError("Failed to load documents");
+        setError("Failed to fetch documents");
       }
+    } finally {
+      setIsFetchingDocuments(false);
     }
+  }
+
+  async function pollDocumentsUntilVisible(docId: string) {
+    setIsFetchingDocuments(true);
+
+    try {
+      setError(null);
+
+      for (let attempt = 0; attempt < 20; attempt += 1) {
+        const items = await fetchDocumentsWithRetry();
+        if (items.some((document) => document.doc_id === docId)) {
+          return true;
+        }
+
+        await wait(1000);
+      }
+    } catch (err) {
+      if (err instanceof Error) {
+        setError(err.message);
+      } else {
+        setError("Failed to fetch documents");
+      }
+    } finally {
+      setIsFetchingDocuments(false);
+    }
+
+    return false;
   }
 
   useEffect(() => {
@@ -99,31 +156,18 @@ export default function App() {
   }, [theme]);
 
   useEffect(() => {
-    // Keep selection aligned with the current document list.
-    if (documents.length === 0) {
-      if (selectedDocId !== null) {
-        setSelectedDocId(null);
+    // Drop selections that no longer exist after a document list refresh.
+    setSelectedDocIds((current) => {
+      if (current.length === 0) {
+        return current;
       }
-      return;
-    }
 
-    const hasSelectedDocument = selectedDocId
-      ? documents.some((document) => document.doc_id === selectedDocId)
-      : false;
+      const availableDocIds = new Set(documents.map((document) => document.doc_id));
+      const nextSelectedDocIds = current.filter((docId) => availableDocIds.has(docId));
 
-    if (hasSelectedDocument) {
-      return;
-    }
-
-    if (documents.length === 1) {
-      setSelectedDocId(documents[0].doc_id);
-      return;
-    }
-
-    if (selectedDocId !== null) {
-      setSelectedDocId(null);
-    }
-  }, [documents, selectedDocId]);
+      return nextSelectedDocIds.length === current.length ? current : nextSelectedDocIds;
+    });
+  }, [documents]);
 
   // Stop the active streaming query and reset the UI back to idle.
   function handleStop() {
@@ -136,16 +180,15 @@ export default function App() {
   async function handleSubmit() {
     // Ignore empty submissions so the backend is only called with real input.
     const trimmedQuery = queryText.trim();
-    const effectiveSelectedDocId =
-      selectedDocId ?? (documents.length === 1 ? documents[0].doc_id : null);
+    const effectiveSelectedDocIds = selectedDocIds;
 
     if (!trimmedQuery) {
       return;
     }
 
     // Document-only mode requires an explicit document selection first.
-    if (uiMode === "document" && !effectiveSelectedDocId) {
-      setQueryError("Select a document first.");
+    if (uiMode === "document" && effectiveSelectedDocIds.length === 0) {
+      setQueryError("Select at least one document first.");
       return;
     }
 
@@ -189,9 +232,10 @@ export default function App() {
 
       let docIds: string[] | undefined;
 
-      // When a document is selected, scope retrieval to that document if the mode allows it.
-      if ((uiMode === "document" || uiMode === "auto") && effectiveSelectedDocId) {
-        docIds = [effectiveSelectedDocId];
+      // When one or more documents are selected, scope retrieval to those
+      // documents if the current mode allows document filtering.
+      if ((uiMode === "document" || uiMode === "auto") && effectiveSelectedDocIds.length > 0) {
+        docIds = effectiveSelectedDocIds;
       }
 
       // Build the request payload and include doc_ids only when a document filter exists.
@@ -279,8 +323,17 @@ export default function App() {
     try {
       // Refresh after upload so any backend-generated metadata is reflected in the UI.
       const data = await uploadDocument(file);
-      await loadDocuments();
-      setSelectedDocId(data.document.doc_id);
+      const foundDocument = await pollDocumentsUntilVisible(data.document.doc_id);
+      if (!foundDocument) {
+        setDocuments((current) => {
+          if (current.some((document) => document.doc_id === data.document.doc_id)) {
+            return current;
+          }
+
+          return [...current, data.document];
+        });
+      }
+      setSelectedDocIds([data.document.doc_id]);
     } catch (err) {
       if (err instanceof Error) {
         setUploadError(err.message);
@@ -313,9 +366,7 @@ export default function App() {
       setDocuments((current) => current.filter((item) => item.doc_id !== data.doc_id));
 
       // Clear the selection if the deleted document was the active one.
-      if (selectedDocId === data.doc_id) {
-        setSelectedDocId(null);
-      }
+      setSelectedDocIds((current) => current.filter((docId) => docId !== data.doc_id));
     } catch (err) {
       if (err instanceof Error) {
         setUploadError(err.message);
@@ -332,11 +383,17 @@ export default function App() {
       {/* Left pane handles upload, selection, and document actions. */}
       <DocumentsPane
         documents={documents}
-        selectedDocId={selectedDocId}
+        isFetchingDocuments={isFetchingDocuments}
+        selectedDocIds={selectedDocIds}
         error={error}
         deletingDocId={deletingDocId}
         openMenuDocId={openMenuDocId}
-        onSelectDocument={setSelectedDocId}
+        onSelectDocument={setSelectedDocIds}
+        onToggleSelectAll={() =>
+          setSelectedDocIds((current) =>
+            current.length > 0 ? [] : documents.map((document) => document.doc_id),
+          )
+        }
         onDeleteDocument={handleDeleteDocument}
         onToggleMenu={setOpenMenuDocId}
       />

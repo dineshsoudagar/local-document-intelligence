@@ -2,43 +2,71 @@ import type { DocumentItem } from "../types";
 
 type DocumentsPaneProps = {
   documents: DocumentItem[];
-  selectedDocId: string | null;
+  isFetchingDocuments: boolean;
+  selectedDocIds: string[];
   error: string | null;
   deletingDocId: string | null;
   openMenuDocId: string | null;
-  onSelectDocument: (docId: string) => void;
+  onSelectDocument: (docIds: string[]) => void;
+  onToggleSelectAll: () => void;
   onDeleteDocument: (document: DocumentItem) => Promise<void>;
   onToggleMenu: (docId: string | null) => void;
 };
 
 export function DocumentsPane({
   documents,
-  selectedDocId,
+  isFetchingDocuments,
+  selectedDocIds,
   error,
   deletingDocId,
   openMenuDocId,
   onSelectDocument,
+  onToggleSelectAll,
   onDeleteDocument,
   onToggleMenu,
 }: DocumentsPaneProps) {
+  const hasSelection = selectedDocIds.length > 0;
+
   return (
     <aside className="left-pane">
-      <h2>Documents</h2>
+      <div className="documents-header">
+        <h2>Documents</h2>
+
+        <button
+          type="button"
+          className="documents-clear-button"
+          onClick={onToggleSelectAll}
+          disabled={documents.length === 0}
+        >
+          {hasSelection ? "Unselect All" : "Select All"}
+        </button>
+      </div>
       {error && <p>{error}</p>}
+      {isFetchingDocuments && <p className="documents-status">Fetching documents...</p>}
 
       <ul className="document-list">
         {documents.map((document) => (
           <li key={document.doc_id}>
             <div className="document-row">
-              {/* Selecting a document makes it available for single-document queries. */}
+              {/* Document selection is toggle-based so the user can build a
+                  filtered subset of documents directly from the list. */}
               <button
                 type="button"
                 className={
-                  document.doc_id === selectedDocId
+                  selectedDocIds.includes(document.doc_id)
                     ? "document-button selected"
                     : "document-button"
                 }
-                onClick={() => onSelectDocument(document.doc_id)}
+                onClick={() => {
+                  if (selectedDocIds.includes(document.doc_id)) {
+                    onSelectDocument(
+                      selectedDocIds.filter((docId) => docId !== document.doc_id),
+                    );
+                    return;
+                  }
+
+                  onSelectDocument([...selectedDocIds, document.doc_id]);
+                }}
               >
                 {document.original_filename}
               </button>

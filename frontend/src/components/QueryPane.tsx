@@ -260,18 +260,10 @@ export function QueryPane({
           <div className="scope-toggle">
             <button
               type="button"
-              className={uiMode === "corpus" ? "scope-button selected" : "scope-button"}
-              onClick={() => onModeChange("corpus")}
+              className={uiMode === "auto" ? "scope-button selected" : "scope-button"}
+              onClick={() => onModeChange("auto")}
             >
-              Corpus
-            </button>
-
-            <button
-              type="button"
-              className={uiMode === "document" ? "scope-button selected" : "scope-button"}
-              onClick={() => onModeChange("document")}
-            >
-              Single Document
+              Auto
             </button>
 
             <button
@@ -284,10 +276,18 @@ export function QueryPane({
 
             <button
               type="button"
-              className={uiMode === "auto" ? "scope-button selected" : "scope-button"}
-              onClick={() => onModeChange("auto")}
+              className={uiMode === "corpus" ? "scope-button selected" : "scope-button"}
+              onClick={() => onModeChange("corpus")}
             >
-              Auto
+              Corpus
+            </button>
+
+            <button
+              type="button"
+              className={uiMode === "document" ? "scope-button selected" : "scope-button"}
+              onClick={() => onModeChange("document")}
+            >
+              Selected Documents
             </button>
           </div>
         </div>
