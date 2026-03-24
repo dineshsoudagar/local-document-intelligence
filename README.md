@@ -2,67 +2,83 @@
 
 A fully local document intelligence system for building a private document workspace with persistent indexing, hybrid retrieval, reranking, and grounded answer generation over local models.
 
-This repository is aimed at a real local workflow. Documents stay on disk, retrieval runs against a local Qdrant index, and answer generation runs through locally loaded models.
+Documents stay on disk, retrieval runs against a local Qdrant index, and answer generation runs through locally loaded models.
+
+## Features
+
+- Upload and store PDF documents locally
+- Build a persistent local knowledge base
+- Search across the full document corpus
+- Restrict search to a single selected document
+- Use hybrid retrieval with dense and sparse search
+- Rerank retrieved evidence before answer generation
+- Generate grounded answers from local models
+- Return partial or unsupported responses when evidence is weak instead of guessing
+- Run through a local FastAPI backend and React frontend
+
+## Demo
+
+Add your demo GIF here.
+
+```md
+![Demo](./assets/demo.gif)
+```
+
+## Getting Started
+
+### Requirements
+
+- Python 3.11 or newer
+- PowerShell
+
+### Hardware
+
+The current setup is aimed at machines with at least **8 GB VRAM** for a comfortable local run with the present model stack.
+
+This is not yet tuned for low-end PCs. Lower-memory support is planned in a later iteration.
+
+### Run the application
+
+Start the app with:
+
+```powershell
+powershell -ExecutionPolicy Bypass -File .\launch-app.ps1
+```
+
+The launch script is expected to:
+
+- create `./local_int_venv` if it does not already exist
+- install CUDA-enabled `torch` into that environment
+- install `requirements.txt`
+- download configured models into `./models` if missing
+- start the FastAPI app on `http://localhost:8000`
+- open the application in the browser
 
 ## Query Modes
-
-The application currently exposes four practical query modes.
 
 ### Auto
 
 Auto mode decides whether a query should be handled as normal assistant chat or as document-grounded retrieval.
 
-Use this when you do not want to manually choose between free chat and document search. The system first classifies the request. If the query looks like a normal conversational or meta request, it answers directly. If the query needs document evidence, it runs retrieval instead.
+Use this when you do not want to manually choose between free chat and document search.
 
 ### Chat
 
 Chat mode skips retrieval and answers directly as a local assistant.
 
-Use this for general interaction, system questions, or messages that do not require document evidence. This mode is intentionally separate from grounded search so conversational requests do not pay retrieval cost unnecessarily.
+Use this for general interaction, system questions, or messages that do not require document evidence.
 
 ### Corpus
 
 Corpus mode searches across the full indexed knowledge base.
 
-Use this when the answer may be spread across multiple uploaded documents or when you want the system to search the entire local corpus. This is the default grounded search behavior when no specific document is selected.
+Use this when the answer may be spread across multiple uploaded documents or when you want to search the entire local corpus.
 
 ### Single Document
 
 Single document mode restricts retrieval to one selected document.
 
-Use this when you want the answer to come only from one document instead of the full corpus. This is useful for focused review, contract inspection, paper reading, and situations where cross-document mixing would be undesirable.
-
-## Runtime Design
-
-The system is built around a controlled local retrieval pipeline instead of a single vector lookup.
-
-At a high level, the runtime flow is:
-
-1. parse the uploaded document into chunks
-2. store chunk text and metadata locally
-3. index chunks into a local Qdrant collection
-4. retrieve candidates with dense and sparse search
-5. fuse retrieval results
-6. rerank the fused candidates
-7. build grounded context from the strongest evidence
-8. judge whether the evidence is sufficient
-9. generate either:
-   - a grounded supported answer
-   - a partial answer with explicit incompleteness
-   - or an unsupported response instead of bluffing
-
-The retrieval layer is not dense-only. It uses dense search, sparse BM25-style search, reciprocal-rank fusion, reranking, and a bounded second pass when early evidence is weak.
-
-## Technical Characteristics
-
-- Local Qdrant storage for persistent indexing
-- Hybrid retrieval using dense embeddings and sparse BM25-style search
-- Reranker-based final evidence selection
-- Evidence judgment before final answer generation
-- Selected-document filtering when a single document is chosen
-- Local FastAPI backend
-- React frontend
-- Release runtime serves the built frontend directly from `frontend/dist`
+Use this when you want the answer to come only from one document instead of the full corpus.
 
 ## Models
 
@@ -73,45 +89,50 @@ Current default model stack:
 - Answer generation: `Qwen/Qwen3-4B-Instruct-2507`
 - Sparse retrieval: `Qdrant/bm25`
 
-Models are stored locally under `models/`.
+All models are stored locally under `models/`.
 
-## Runtime Requirements
+## How It Works
 
-### Prerequisites
+The system uses a local retrieval pipeline instead of a single vector lookup.
 
-- Python 3.11 or newer
-- PowerShell
+At a high level, the flow is:
 
-### Current hardware target
+1. Parse the uploaded document into chunks
+2. Store chunk text and metadata locally
+3. Index chunks into a local Qdrant collection
+4. Retrieve candidates with dense and sparse search
+5. Fuse retrieval results
+6. Rerank the fused candidates
+7. Build grounded context from the strongest evidence
+8. Judge whether the evidence is sufficient
+9. Generate either:
+   - a grounded supported answer
+   - a partial answer with explicit incompleteness
+   - or an unsupported response instead of guessing
 
-The current setup is aimed at machines with at least **8 GB VRAM** for a comfortable local run with the present model stack.
+## Tech Stack
 
-This is not yet tuned for low-end PCs. Lower-memory support is planned as part of the next round of optimization work.
+- Backend: FastAPI
+- Frontend: React
+- Vector store: Qdrant
+- Parsing: Docling
+- Local models: Qwen embedding, reranker, and generator models
 
-## Release Runtime
+## Frontend Development
 
-For release-style usage, npm is not required at runtime. FastAPI serves the built frontend directly from `frontend/dist`.
+The built frontend is already used for normal application startup.
 
-Start the application with:
+Only rebuild the frontend if you are editing the UI.
+
+### Run in development mode
 
 ```powershell
-powershell -ExecutionPolicy Bypass -File .\launch-app.ps1
+powershell -ExecutionPolicy Bypass -File .\launch-dev.ps1
 ```
 
-`launch-app.ps1` is expected to:
+This mode requires Node.js and npm because it runs the Vite development server.
 
-- create `./local_int_venv` if it does not already exist
-- install CUDA-enabled `torch` into that environment
-- install `requirements.txt`
-- download configured models into `./models` if missing
-- start the FastAPI app on `http://localhost:8000`
-- open the application in the browser
-
-## Frontend Build
-
-Node.js and npm are only required when building or rebuilding the frontend.
-
-Build the frontend once before using `launch-app.ps1`:
+### Rebuild the frontend
 
 ```powershell
 Set-Location .\frontend
@@ -120,21 +141,13 @@ npm run build
 Set-Location ..
 ```
 
-This generates the release frontend under `frontend/dist`.
+This generates the production frontend under `frontend/dist`.
 
-## Development Mode
+## Installing Node.js
 
-If you are editing the frontend, use:
+Node.js and npm are only required when developing or rebuilding the frontend.
 
-```powershell
-powershell -ExecutionPolicy Bypass -File .\launch-dev.ps1
-```
-
-This mode requires Node.js and npm because it runs the Vite development server.
-
-## Optional Node.js Install
-
-If you need Node.js on Windows, install the LTS version with:
+On Windows, install the LTS version with:
 
 ```powershell
 winget install OpenJS.NodeJS.LTS
@@ -171,13 +184,11 @@ node -v
 npm -v
 ```
 
-## Upcoming Features
-
-Planned next improvements include:
+## Planned Improvements
 
 - DOCX support
-- image-aware document support
-- better support for low-end PCs
-- lower-memory runtime options
-- more packaging and deployment polish
-- continued refinement of corpus and single-document workflows
+- Image-aware document support
+- Better support for low-end PCs
+- Lower-memory runtime options
+- More packaging and deployment polish
+- Continued refinement of corpus and single-document workflows
