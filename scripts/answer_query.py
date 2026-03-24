@@ -1,6 +1,6 @@
-from __future__ import annotations
-
 """CLI entrypoint for answer generation over the local corpus."""
+
+from __future__ import annotations
 
 import argparse
 import time

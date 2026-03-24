@@ -1,10 +1,6 @@
-from __future__ import annotations
+"""Health-related API routes."""
 
-# Learning:
-# This module contains health-related API routes.
-#
-# Prod:
-# Health check routes.
+from __future__ import annotations
 
 from fastapi import APIRouter, Depends
 
@@ -20,13 +16,7 @@ router = APIRouter()
 def health(
     paths: AppPaths = Depends(get_app_paths_from_state),
 ) -> HealthResponse:
-    """
-    Learning:
-    This endpoint proves the server is running and that dependency injection works.
-
-    Prod:
-    Liveness endpoint for basic service health checks.
-    """
+    """Return a lightweight liveness response."""
     return HealthResponse(
         status="ok",
         documents_dir=str(paths.documents_dir),
@@ -37,13 +27,7 @@ def health(
 def health_details(
     paths: AppPaths = Depends(get_app_paths_from_state),
 ) -> dict[str, str]:
-    """
-    Learning:
-    This endpoint returns all storage paths so we can inspect app setup.
-
-    Prod:
-    Return basic application storage details.
-    """
+    """Return the configured storage locations for diagnostics."""
     return {
         "base_dir": str(paths.base_dir),
         "documents_dir": str(paths.documents_dir),

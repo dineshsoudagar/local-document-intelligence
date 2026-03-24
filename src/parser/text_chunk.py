@@ -1,6 +1,6 @@
-from __future__ import annotations
-
 """Shared data model for parsed chunks."""
+
+from __future__ import annotations
 
 from dataclasses import asdict, dataclass
 from typing import Any

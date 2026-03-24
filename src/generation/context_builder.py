@@ -1,6 +1,6 @@
-from __future__ import annotations
-
 """Utilities for building grounded prompt context and rendering answer sources."""
+
+from __future__ import annotations
 
 from dataclasses import dataclass
 from typing import Any, Sequence

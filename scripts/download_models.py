@@ -1,3 +1,5 @@
+"""Download configured local models and artifacts into the project models directory."""
+
 from __future__ import annotations
 
 import argparse

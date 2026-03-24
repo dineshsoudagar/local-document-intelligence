@@ -1,10 +1,6 @@
-from __future__ import annotations
+"""Application storage path helpers."""
 
-# Learning:
-# This module defines the storage folders used by the app in one place.
-#
-# Prod:
-# Application storage path helpers.
+from __future__ import annotations
 
 from dataclasses import dataclass
 from pathlib import Path
@@ -12,44 +8,27 @@ from pathlib import Path
 
 @dataclass(frozen=True)
 class AppPaths:
-    """
-    Learning:
-    Holds the main storage paths used by the application.
-
-    Instead of writing folder names in many files, we define them once here.
-    This keeps path handling clean and consistent.
-
-    Prod:
-    Centralized application storage paths.
-    """
+    """Centralize the storage locations used by the application."""
 
     base_dir: Path
 
     @property
     def documents_dir(self) -> Path:
-        """
-        Managed document storage directory.
-        """
+        """Return the managed document storage directory."""
         return self.base_dir / "documents"
 
     @property
     def metadata_dir(self) -> Path:
-        """
-        Metadata storage directory.
-        """
+        """Return the metadata storage directory."""
         return self.base_dir / "metadata"
 
     @property
     def qdrant_dir(self) -> Path:
-        """
-        Local Qdrant storage directory.
-        """
+        """Return the local Qdrant storage directory."""
         return self.base_dir / "qdrant"
 
     def ensure_exists(self) -> None:
-        """
-        Create required storage directories.
-        """
+        """Create all required storage directories."""
         self.documents_dir.mkdir(parents=True, exist_ok=True)
         self.metadata_dir.mkdir(parents=True, exist_ok=True)
         self.qdrant_dir.mkdir(parents=True, exist_ok=True)

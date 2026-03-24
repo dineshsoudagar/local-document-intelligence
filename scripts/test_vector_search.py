@@ -1,6 +1,6 @@
-from __future__ import annotations
-
 """CLI entrypoint for indexing a PDF and running hybrid search."""
+
+from __future__ import annotations
 
 import argparse
 from pathlib import Path

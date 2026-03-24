@@ -1,6 +1,6 @@
-from __future__ import annotations
-
 """Hybrid Qdrant index with dense retrieval, sparse retrieval, and reranking."""
+
+from __future__ import annotations
 
 import uuid
 from dataclasses import dataclass

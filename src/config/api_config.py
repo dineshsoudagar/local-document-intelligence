@@ -1,6 +1,6 @@
-from __future__ import annotations
-
 """Runtime settings for the FastAPI server."""
+
+from __future__ import annotations
 
 from dataclasses import dataclass
 

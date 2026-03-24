@@ -1,6 +1,6 @@
-from __future__ import annotations
-
 """Docling-based parser that extracts text and optional picture chunks."""
+
+from __future__ import annotations
 
 import uuid
 from pathlib import Path
