@@ -20,9 +20,9 @@ Documents stay on disk, retrieval runs against a local Qdrant index, and answer 
 
 Add your demo GIF here.
 
-```md
-![Demo](demo.gif)
-```
+<p align="center">
+  <img src="demo.gif" App UI Demo " width="90%" style="margin: 1%"/>
+</p>
 
 ## Getting Started
 
