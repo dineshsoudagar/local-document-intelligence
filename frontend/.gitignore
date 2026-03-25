@@ -8,9 +8,12 @@ pnpm-debug.log*
 lerna-debug.log*
 
 node_modules
-dist
 dist-ssr
 *.local
+
+# Commit the packaged frontend so the app can run without a local npm build.
+!dist/
+!dist/**
 
 # Editor directories and files
 .vscode/*
