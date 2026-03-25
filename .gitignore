@@ -7,7 +7,6 @@ __pycache__/
 .idea
 logs/
 node_modules/
-dist/
 dist-ssr/
 test_venv/
 
