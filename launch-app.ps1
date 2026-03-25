@@ -11,7 +11,7 @@ param(
 )
 
 $ProjectRoot = $PSScriptRoot
-$VenvDir = Join-Path $ProjectRoot "test_venv"
+$VenvDir = Join-Path $ProjectRoot "local_int_venv"
 $VenvPython = Join-Path $VenvDir "Scripts\python.exe"
 $RequirementsPath = Join-Path $ProjectRoot "requirements.txt"
 $FrontendIndexPath = Join-Path $ProjectRoot "frontend\dist\index.html"
