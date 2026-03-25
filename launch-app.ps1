@@ -23,24 +23,60 @@ $ExpectedTorchVersion = "$TorchVersion+$TorchCudaChannel"
 $ExpectedTorchVisionVersion = "$TorchVisionVersion+$TorchCudaChannel"
 $ExpectedTorchAudioVersion = "$TorchAudioVersion+$TorchCudaChannel"
 
-function Get-SystemPythonCommand {
-    $pythonCommand = Get-Command python -ErrorAction SilentlyContinue
-    if ($pythonCommand) {
-        return @{
-            FilePath = $pythonCommand.Source
-            Prefix = @()
-        }
-    }
+function Test-PythonCandidate {
+    param(
+        [Parameter(Mandatory = $true)]
+        [string]$FilePath,
+        [string[]]$Prefix = @()
+    )
 
+    $probeCode = @(
+        "import ssl, sys"
+        "raise SystemExit(0 if sys.version_info >= (3, 11) else 3)"
+    ) -join "; "
+
+    try {
+        & $FilePath @($Prefix + @("-c", $probeCode)) 2>$null | Out-Null
+        return $LASTEXITCODE -eq 0
+    }
+    catch {
+        return $false
+    }
+}
+
+function Get-SystemPythonCommand {
+    $candidates = [System.Collections.Generic.List[hashtable]]::new()
     $pyLauncher = Get-Command py -ErrorAction SilentlyContinue
     if ($pyLauncher) {
-        return @{
-            FilePath = $pyLauncher.Source
-            Prefix = @("-3")
+        foreach ($versionSelector in @("-3.13", "-3.12", "-3.11", "-3")) {
+            $candidates.Add(@{
+                FilePath = $pyLauncher.Source
+                Prefix = @($versionSelector)
+                Label = "py $versionSelector"
+            })
         }
     }
 
-    throw "Python was not found. Install Python 3.11+ and make sure 'python' or 'py' is available on PATH."
+    $pythonCommand = Get-Command python -ErrorAction SilentlyContinue
+    if ($pythonCommand) {
+        $candidates.Add(@{
+            FilePath = $pythonCommand.Source
+            Prefix = @()
+            Label = $pythonCommand.Source
+        })
+    }
+
+    foreach ($candidate in $candidates) {
+        if (Test-PythonCandidate -FilePath $candidate.FilePath -Prefix $candidate.Prefix) {
+            Write-Host "Using Python interpreter: $($candidate.Label)"
+            return @{
+                FilePath = $candidate.FilePath
+                Prefix = $candidate.Prefix
+            }
+        }
+    }
+
+    throw "Python 3.11+ with a working SSL module was not found. Install or repair a standard Python build and make sure 'py' or 'python' is available on PATH."
 }
 
 function Invoke-CheckedCommand {
@@ -79,6 +115,14 @@ function Test-AppHealth {
 function Test-PortInUse {
     $connections = Get-NetTCPConnection -LocalPort $Port -ErrorAction SilentlyContinue
     return [bool]$connections
+}
+
+function Test-VenvPython {
+    if (-not (Test-Path $VenvPython)) {
+        return $false
+    }
+
+    return Test-PythonCandidate -FilePath $VenvPython
 }
 
 function Start-BrowserOnReadyJob {
@@ -223,7 +267,12 @@ if (-not (Test-Path $FrontendIndexPath)) {
 
 $systemPython = Get-SystemPythonCommand
 
-if (-not (Test-Path $VenvPython)) {
+if ((Test-Path $VenvDir) -and -not (Test-VenvPython)) {
+    Write-Host "Existing virtual environment at $VenvDir is invalid. Recreating it with the selected system Python."
+    Remove-Item -LiteralPath $VenvDir -Recurse -Force
+}
+
+if (-not (Test-VenvPython)) {
     Write-Host "Creating virtual environment at $VenvDir"
     Invoke-CheckedCommand `
         -FilePath $systemPython.FilePath `
