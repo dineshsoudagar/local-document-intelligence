@@ -13,6 +13,8 @@ from typing import Any, Iterable
 from huggingface_hub import snapshot_download
 
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
+# Allow this script to be run directly from the repository root without requiring
+# the project package to be installed into the active Python environment.
 if str(PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(PROJECT_ROOT))
 
@@ -140,6 +142,8 @@ def select_assets(only: Iterable[str] | None) -> tuple[list[ModelEntry], list[Ar
         return list(MODEL_CATALOG.hf_models()), list(MODEL_CATALOG.artifacts())
 
     only_keys = set(only)
+    # Resolve user-provided keys against the catalog once so downstream download
+    # code can iterate concrete entries without additional filtering logic.
     selected_models = [
         entry for entry in MODEL_CATALOG.hf_models() if entry.key in only_keys
     ]
@@ -152,6 +156,8 @@ def select_assets(only: Iterable[str] | None) -> tuple[list[ModelEntry], list[Ar
 def ensure_empty_dir(path: Path) -> None:
     """Remove and recreate a directory."""
     if path.exists():
+        # `--force` is intentionally destructive for the target directory so a
+        # rerun cannot leave stale files from a previous snapshot behind.
         shutil.rmtree(path)
     path.mkdir(parents=True, exist_ok=True)
 
@@ -173,6 +179,8 @@ def download_hf_model(
     else:
         target_dir.mkdir(parents=True, exist_ok=True)
 
+    # Download directly into the final project-local directory so consumers can
+    # read the model files without any extra copy or extraction step.
     snapshot_path = snapshot_download(
         repo_id=entry.repo_id,
         revision=entry.revision,
@@ -222,6 +230,9 @@ def download_docling_artifacts(
             "downloading Docling artifacts."
         ) from exc
 
+    # Keep optional Docling components explicit here instead of relying on
+    # library defaults so offline asset contents remain reproducible across
+    # environments and Docling version upgrades.
     download_models(
         output_dir=target_dir,
         force=force,
@@ -262,6 +273,8 @@ def write_manifest(
 ) -> Path:
     """Write a manifest describing all locally downloaded assets."""
     manifest_path = models_root / manifest_name
+    # The manifest is the machine-readable source of truth for what was
+    # downloaded and where it was materialized on disk for this project.
     payload = {
         "models_root": str(models_root.resolve()),
         "models": records,
@@ -275,6 +288,8 @@ def main() -> None:
     args = parse_args()
 
     project_root = Path(args.project_root).resolve()
+    # Ensure the shared models root exists before any per-asset download runs so
+    # manifest writing and summary reporting always have a stable base path.
     models_root = project_root / MODEL_CATALOG.models_root
     models_root.mkdir(parents=True, exist_ok=True)
 
