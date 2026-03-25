@@ -1,5 +1,5 @@
 # Directories
-/data/
+/data/*.pdf
 /models/
 /commented_scripts/
 /storage/
