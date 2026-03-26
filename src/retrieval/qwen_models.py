@@ -11,7 +11,14 @@ from typing import Any, Iterator, Literal, Sequence
 import torch
 from threading import Thread
 from sentence_transformers import SentenceTransformer
-from transformers import AutoModelForCausalLM, AutoTokenizer, TextIteratorStreamer
+from transformers import (
+    AutoModelForCausalLM,
+    AutoTokenizer,
+    BitsAndBytesConfig,
+    TextIteratorStreamer,
+)
+
+from src.config.generator_config import GeneratorConfig
 
 @dataclass(slots=True)
 class GeneratedText:
@@ -221,12 +228,29 @@ class QwenReranker:
         probabilities = torch.softmax(yes_no_logits, dim=1)[:, 1]
         return probabilities.float().cpu().tolist()
 
+def _resolve_torch_dtype(name: str) -> torch.dtype | None:
+    mapping = {
+        "auto": None,
+        "float16": torch.float16,
+        "bfloat16": torch.bfloat16,
+        "float32": torch.float32,
+    }
+    return mapping[name]
 
 class LocalQwenGenerator:
     """Local wrapper for grounded text generation with Qwen instruct models."""
 
-    def __init__(self, model_name: str | Path) -> None:
+    @classmethod
+    def from_config(cls, config: GeneratorConfig) -> "LocalQwenGenerator":
+        return cls(config.generator_model_path, config=config)
+
+    def __init__(
+        self,
+        model_name: str | Path,
+        config: GeneratorConfig | None = None,
+    ) -> None:
         self._model_name = model_name
+        self._config = config
         self._device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
         self._tokenizer = AutoTokenizer.from_pretrained(
@@ -238,23 +262,89 @@ class LocalQwenGenerator:
         if self._tokenizer.pad_token_id is None:
             self._tokenizer.pad_token = self._tokenizer.eos_token
 
+        self._model = self._load_model()
+
+    def _load_model(self):
+        if self._config is None:
+            model_kwargs: dict[str, Any] = {
+                "local_files_only": True,
+                "trust_remote_code": True,
+            }
+            if self._device.type == "cuda":
+                model_kwargs["torch_dtype"] = torch.float16
+                model_kwargs["device_map"] = "auto"
+            else:
+                model_kwargs["torch_dtype"] = torch.float32
+
+            model = AutoModelForCausalLM.from_pretrained(
+                self._model_name,
+                **model_kwargs,
+            ).eval()
+
+            if self._device.type != "cuda":
+                model.to(self._device)
+            return model
+
+        load_mode = self._config.generator_load_mode
+        torch_dtype = _resolve_torch_dtype(self._config.generator_dtype)
+
         model_kwargs: dict[str, Any] = {
             "local_files_only": True,
             "trust_remote_code": True,
         }
-        if self._device.type == "cuda":
-            model_kwargs["dtype"] = torch.float16
-            model_kwargs["device_map"] = "auto"
-        else:
-            model_kwargs["dtype"] = torch.float32
 
-        self._model = AutoModelForCausalLM.from_pretrained(
-            self._model_name,
-            **model_kwargs,
-        ).eval()
+        if load_mode == "standard":
+            if torch_dtype is None:
+                model_kwargs["torch_dtype"] = (
+                    torch.float16 if self._device.type == "cuda" else torch.float32
+                )
+            else:
+                model_kwargs["torch_dtype"] = torch_dtype
+
+            if self._device.type == "cuda" and self._config.generator_device_map is not None:
+                model_kwargs["device_map"] = self._config.generator_device_map
+
+            model = AutoModelForCausalLM.from_pretrained(
+                self._model_name,
+                **model_kwargs,
+            ).eval()
+
+            if self._device.type != "cuda":
+                model.to(self._device)
+            return model
 
         if self._device.type != "cuda":
-            self._model.to(self._device)
+            raise RuntimeError(
+                f"{load_mode} requested, but CUDA is not available. "
+                "Use generator_load_mode='standard' for CPU-only execution."
+            )
+
+        if load_mode == "bnb_8bit":
+            model_kwargs["quantization_config"] = BitsAndBytesConfig(
+                load_in_8bit=True,
+                llm_int8_enable_fp32_cpu_offload=self._config.bnb_int8_enable_fp32_cpu_offload,
+            )
+            model_kwargs["device_map"] = self._config.generator_device_map or "auto"
+            return AutoModelForCausalLM.from_pretrained(
+                self._model_name,
+                **model_kwargs,
+            ).eval()
+
+        if load_mode == "bnb_4bit":
+            compute_dtype = torch_dtype or torch.bfloat16
+            model_kwargs["quantization_config"] = BitsAndBytesConfig(
+                load_in_4bit=True,
+                bnb_4bit_quant_type=self._config.bnb_4bit_quant_type,
+                bnb_4bit_use_double_quant=self._config.bnb_4bit_use_double_quant,
+                bnb_4bit_compute_dtype=compute_dtype,
+            )
+            model_kwargs["device_map"] = self._config.generator_device_map or "auto"
+            return AutoModelForCausalLM.from_pretrained(
+                self._model_name,
+                **model_kwargs,
+            ).eval()
+
+        raise ValueError(f"Unsupported generator_load_mode: {load_mode}")
 
     @property
     def device(self) -> torch.device:

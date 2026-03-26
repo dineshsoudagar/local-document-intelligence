@@ -17,3 +17,5 @@ pydantic~=2.12.5
 huggingface_hub
 python-multipart
 fastembed
+bitsandbytes
+accelerate

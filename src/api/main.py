@@ -81,8 +81,9 @@ async def lifespan(app: FastAPI):
     generator_config = GeneratorConfig(
         model_catalog=model_catalog,
         pipeline_models=pipeline_models,
-    )
-    generator = LocalQwenGenerator(generator_config.generator_model_path)
+    ).with_load_preset("balanced_8bit")
+
+    generator = LocalQwenGenerator.from_config(generator_config)
     answer_service = GroundedAnswerService(
         index=index_service.index,
         config=generator_config,

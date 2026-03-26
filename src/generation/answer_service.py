@@ -116,7 +116,7 @@ class GroundedAnswerService:
     def generator(self) -> LocalQwenGenerator:
         """Return a lazily initialized local generator."""
         if self._generator is None:
-            self._generator = LocalQwenGenerator(self._config.generator_model_path)
+            self._generator = LocalQwenGenerator.from_config(self._config)
         return self._generator
 
     def answer(
