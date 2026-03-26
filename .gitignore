@@ -1,5 +1,8 @@
 # Directories
-/data/*.pdf
+data/
+/data/pdfs/*.pdf
+/data/**/*.txt
+/data/**/*.txt
 /models/
 /commented_scripts/
 /storage/
@@ -34,23 +37,4 @@ lerna-debug.log*
 .vscode/*
 !.vscode/extensions.json
 .DS_Store
-frontend/.npm-cache/_update-notifier-last-checked
-frontend/.npm-cache/_cacache/content-v2/sha512/10/2b/e029f757a16e48c8a3526a7dfa124efbc5fc8410d7f476f21a34bfc0c2a1a19708ee9f7b2666c7f96047ed52a03d235f1ff49156500a44a063ce57e145af
-frontend/.npm-cache/_cacache/content-v2/sha512/39/34/d07d14c88a37cc2ff39bbaa2fa189ad93ba726657c5ae24757a79efdf807f50e2d104ee9dc0baae269b14f0bf80484759c2a5ccbb46c6c8fd7df23c5d713
-frontend/.npm-cache/_cacache/content-v2/sha512/43/ca/dfb9ffb4a6851566b521d695fbf9220c8e1753fa0093ea7537fe550b28a52dd8cf152d57aeecb60ea3d319a538deaff03353b16638b72c47222ae4c1d4b0
-frontend/.npm-cache/_cacache/content-v2/sha512/4e/49/59371bb3ae75b9fef227298541bd0b3880bd2796364b3c7e3a570c7e329609fbffe2b25c1239b94de619b15743a9d48fd05b3e33636d8b6563b856ef8ccc
-frontend/.npm-cache/_cacache/content-v2/sha512/99/6a/b02528fabc456d4198681fc9b953671684205731fcf7398ec70d5e37a43de76682d42aedee5963f99213c1542434ca955d0cd1cdad70a183c06216a38ba2
-frontend/.npm-cache/_cacache/content-v2/sha512/a5/d3/109c336f566128eeeea1e39d5ab0921f890b8ec95611970dd788f941d9226baba1ac327f48bcd1cb8f69e46faa47731674c11ab15b4210791ada9f6d859c
-frontend/.npm-cache/_cacache/content-v2/sha512/bd/65/a58b45b2c6abcb96bdbc1d5d4ecb2d40b2d95ca3a61009ed7e179da39dfed074882f6af1256d9bce635058963ac000c020d5e872262ad7ac384188350177
-frontend/.npm-cache/_cacache/content-v2/sha512/be/7f/fe6ff808dd9fe767eb279fc9d13fc23bd7ee5c8017992585991010cfc2df6676fd0a95668ba664a59797670f465b2662e85ca254d4f719bf2d4bd986a1f5
-frontend/.npm-cache/_cacache/content-v2/sha512/ec/4a/25bc15c09761a4585c5d5d5cb8705c7c00b071ad5a67cdb24e8c37a92604b2e2562d8b2cc45fe1cb4b0cb7a65a42dd4c9c62363ba6b9a79ef49d3adbb701
-frontend/.npm-cache/_cacache/content-v2/sha512/f8/5a/bb2e7b479aec44e8d3deb255d0a0d39211ba45809b11d2f492ee713dd23b0651dd8e691b2a891ffc6db475c20eeb732995dcea0eb6c5c3669e9b2719e62a
-frontend/.npm-cache/_cacache/index-v5/01/34/3940c30c775025d22ff480ab71b1e2d5376777c06e32e0a21d305dc3bff1
-frontend/.npm-cache/_cacache/index-v5/17/5f/026013c4b31d065bd24c1f232a1928701f00c8bd888172ebfb0fbbd69d75
-frontend/.npm-cache/_cacache/index-v5/38/41/cb9b6de280c068078b6cdeea772cf2b12729e1193873667e2f95fc9c1f58
-frontend/.npm-cache/_cacache/index-v5/56/64/ed3d5de8c6d0d59951da1e504de02fdd08ee35a6146385991914f71e049b
-frontend/.npm-cache/_cacache/index-v5/7c/11/6a1952703da73d44b998688555dd07f258e0833f789ee0203fff82a6f5fe
-frontend/.npm-cache/_cacache/index-v5/80/3a/a07dac99dccbcaf4bb225775ba6e9190125b51a4465581f446eb523afa51
-frontend/.npm-cache/_cacache/index-v5/95/75/687939821827baf89453eb86559a27c09f58aeb98ea6455ac1964224bc85
-frontend/.npm-cache/_cacache/index-v5/ba/e1/1db388ef1f191bb91372bde36fe04181bfcd85b33e4c3459e39bb3559acd
-frontend/.npm-cache/_cacache/index-v5/f2/8d/974109f301d73dda14d7278c08e812ce432dcb3479eaac7e2139f2587d72
+frontend/.npm-cache/*
