@@ -5,7 +5,7 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from pathlib import Path
 
-from src.config.model_catalog import ModelCatalog
+from src.config.model_catalog import ModelCatalog, PipelineModels, default_pipeline_models
 
 
 def _default_project_root() -> Path:
@@ -19,7 +19,7 @@ class IndexConfig:
 
     project_root: Path = field(default_factory=_default_project_root)
     model_catalog: ModelCatalog = field(default_factory=ModelCatalog)
-
+    pipeline_models: PipelineModels = field(default_factory=PipelineModels)
     qdrant_relative_path: str = "storage/qdrant"
     qdrant_path_override: str | Path | None = None
     collection_name: str = "document_chunks"
@@ -27,9 +27,6 @@ class IndexConfig:
     sparse_model_name: str = "Qdrant/bm25"
     dense_vector_name: str = "dense"
     sparse_vector_name: str = "bm25"
-
-    dense_model_name_override: str | Path | None = None
-    reranker_model_name_override: str | Path | None = None
 
     dense_query_instruction: str = (
         "Given a document search query, retrieve relevant passages that answer the query"
@@ -72,16 +69,22 @@ class IndexConfig:
     @property
     def dense_model_name(self) -> str:
         """Return the resolved local dense embedder path."""
-        if self.dense_model_name_override is not None:
-            return str(Path(self.dense_model_name_override).resolve())
-        return str(self.model_catalog.embedder_path(self.project_root))
+        return str(
+            self.model_catalog.resolve_hf_path(
+                self.pipeline_models.embedder_key,
+                self.project_root,
+            )
+        )
 
     @property
     def reranker_model_name(self) -> str:
         """Return the resolved local reranker path."""
-        if self.reranker_model_name_override is not None:
-            return str(Path(self.reranker_model_name_override).resolve())
-        return str(self.model_catalog.reranker_path(self.project_root))
+        return str(
+            self.model_catalog.resolve_hf_path(
+                self.pipeline_models.reranker_key,
+                self.project_root,
+            )
+        )
 
     def validate(self) -> None:
         """Validate configuration values and fail early on broken local paths."""

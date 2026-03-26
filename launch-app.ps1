@@ -15,9 +15,9 @@ $VenvDir = Join-Path $ProjectRoot "local_int_venv"
 $VenvPython = Join-Path $VenvDir "Scripts\python.exe"
 $RequirementsPath = Join-Path $ProjectRoot "requirements.txt"
 $FrontendIndexPath = Join-Path $ProjectRoot "frontend\dist\index.html"
-$ModelManifestPath = Join-Path $ProjectRoot "models\manifest.json"
-$HealthUrl = "http://localhost:$Port/healthz"
-$AppUrl = "http://localhost:$Port/"
+$BindHost = "127.0.0.1"
+$HealthUrl = "http://${BindHost}:$Port/healthz"
+$AppUrl = "http://${BindHost}:$Port/"
 $TorchIndexUrl = "https://download.pytorch.org/whl/$TorchCudaChannel"
 $ExpectedTorchVersion = "$TorchVersion+$TorchCudaChannel"
 $ExpectedTorchVisionVersion = "$TorchVisionVersion+$TorchCudaChannel"
@@ -112,9 +112,81 @@ function Test-AppHealth {
     }
 }
 
-function Test-PortInUse {
-    $connections = Get-NetTCPConnection -LocalPort $Port -ErrorAction SilentlyContinue
-    return [bool]$connections
+function Get-PortListeners {
+    try {
+        return @(Get-NetTCPConnection -State Listen -LocalPort $Port -ErrorAction Stop)
+    }
+    catch {
+        return @()
+    }
+}
+
+function Get-PortListenerDetails {
+    param(
+        [Parameter(Mandatory = $true)]
+        [object[]]$Listeners
+    )
+
+    $processIds = @(
+        $Listeners |
+            Select-Object -ExpandProperty OwningProcess -Unique |
+            Where-Object { $_ -and $_ -gt 0 }
+    )
+    if ($processIds.Count -eq 0) {
+        return @()
+    }
+
+    $processesById = @{}
+    foreach ($process in @(Get-Process -Id $processIds -ErrorAction SilentlyContinue)) {
+        $processesById[$process.Id] = $process
+    }
+
+    $details = foreach ($processId in $processIds) {
+        $process = $processesById[$processId]
+        if ($process) {
+            [PSCustomObject]@{
+                Id = $processId
+                ProcessName = $process.ProcessName
+                Path = $process.Path
+            }
+        }
+        else {
+            [PSCustomObject]@{
+                Id = $processId
+                ProcessName = "unknown"
+                Path = $null
+            }
+        }
+    }
+
+    return @($details)
+}
+
+function Format-PortConflictMessage {
+    param(
+        [Parameter(Mandatory = $true)]
+        [object[]]$Listeners
+    )
+
+    $details = Get-PortListenerDetails -Listeners $Listeners
+    if ($details.Count -eq 0) {
+        return "Port $Port is already in use by another listener, but its owning process could not be resolved. Health endpoint checked: $HealthUrl"
+    }
+
+    $detailLines = $details | ForEach-Object {
+        if ($_.Path) {
+            "PID $($_.Id): $($_.ProcessName) ($($_.Path))"
+        }
+        else {
+            "PID $($_.Id): $($_.ProcessName)"
+        }
+    }
+
+    return @(
+        "Port $Port is already in use by another listener, and the health endpoint at $HealthUrl is not responding for this app."
+        "Listeners:"
+        ($detailLines -join [Environment]::NewLine)
+    ) -join [Environment]::NewLine
 }
 
 function Test-VenvPython {
@@ -301,20 +373,20 @@ else {
     Ensure-TorchInstalled
 }
 
-if ($ForceModelDownload -or -not (Test-Path $ModelManifestPath)) {
-    Write-Host "Downloading local models into the project models directory"
-    Invoke-CheckedCommand `
-        -FilePath $VenvPython `
-        -Arguments @(
-            (Join-Path $ProjectRoot "scripts\download_models.py"),
-            "--project-root",
-            $ProjectRoot
-        ) `
-        -FailureMessage "Failed to download the configured models."
+$modelDownloadArgs = @(
+    (Join-Path $ProjectRoot "scripts\download_models.py"),
+    "--project-root",
+    $ProjectRoot
+)
+if ($ForceModelDownload) {
+    $modelDownloadArgs += "--force"
 }
-else {
-    Write-Host "Model manifest already exists at $ModelManifestPath. Skipping model download."
-}
+
+Write-Host "Ensuring required local models are available"
+Invoke-CheckedCommand `
+    -FilePath $VenvPython `
+    -Arguments $modelDownloadArgs `
+    -FailureMessage "Failed to download the configured models."
 
 if (Test-AppHealth) {
     Write-Host "The application is already running at $AppUrl"
@@ -324,8 +396,9 @@ if (Test-AppHealth) {
     return
 }
 
-if (Test-PortInUse) {
-    throw "Port $Port is already in use, but the health endpoint at $HealthUrl is not responding for this app."
+$portListeners = Get-PortListeners
+if ($portListeners.Count -gt 0) {
+    throw (Format-PortConflictMessage -Listeners $portListeners)
 }
 
 Write-Host "Starting the application on $AppUrl"
@@ -341,7 +414,7 @@ try {
     & $VenvPython @(
         "-m", "uvicorn",
         "src.api.main:app",
-        "--host", "localhost",
+        "--host", $BindHost,
         "--port", "$Port"
     )
 

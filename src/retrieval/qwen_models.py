@@ -5,12 +5,36 @@ from __future__ import annotations
 from pathlib import Path
 
 import re
-from typing import Any, Iterator, Sequence
+from dataclasses import dataclass
+from typing import Any, Iterator, Literal, Sequence
 
 import torch
 from threading import Thread
 from sentence_transformers import SentenceTransformer
-from transformers import AutoModelForCausalLM, AutoTokenizer, TextIteratorStreamer
+from transformers import (
+    AutoModelForCausalLM,
+    AutoTokenizer,
+    BitsAndBytesConfig,
+    TextIteratorStreamer,
+)
+
+from src.config.generator_config import GeneratorConfig
+
+@dataclass(slots=True)
+class GeneratedText:
+    """Structured generation result."""
+
+    answer: str
+    thinking_content: str | None = None
+    thinking_finished: bool = False
+
+
+@dataclass(slots=True)
+class StreamEvent:
+    """Typed generation event for streaming."""
+
+    kind: Literal["thinking_token", "thinking_done", "answer_token"]
+    text: str = ""
 
 
 class QwenDenseEmbedder:
@@ -204,12 +228,29 @@ class QwenReranker:
         probabilities = torch.softmax(yes_no_logits, dim=1)[:, 1]
         return probabilities.float().cpu().tolist()
 
+def _resolve_torch_dtype(name: str) -> torch.dtype | None:
+    mapping = {
+        "auto": None,
+        "float16": torch.float16,
+        "bfloat16": torch.bfloat16,
+        "float32": torch.float32,
+    }
+    return mapping[name]
 
 class LocalQwenGenerator:
     """Local wrapper for grounded text generation with Qwen instruct models."""
 
-    def __init__(self, model_name: str | Path) -> None:
+    @classmethod
+    def from_config(cls, config: GeneratorConfig) -> "LocalQwenGenerator":
+        return cls(config.generator_model_path, config=config)
+
+    def __init__(
+        self,
+        model_name: str | Path,
+        config: GeneratorConfig | None = None,
+    ) -> None:
         self._model_name = model_name
+        self._config = config
         self._device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
         self._tokenizer = AutoTokenizer.from_pretrained(
@@ -221,23 +262,89 @@ class LocalQwenGenerator:
         if self._tokenizer.pad_token_id is None:
             self._tokenizer.pad_token = self._tokenizer.eos_token
 
+        self._model = self._load_model()
+
+    def _load_model(self):
+        if self._config is None:
+            model_kwargs: dict[str, Any] = {
+                "local_files_only": True,
+                "trust_remote_code": True,
+            }
+            if self._device.type == "cuda":
+                model_kwargs["torch_dtype"] = torch.float16
+                model_kwargs["device_map"] = "auto"
+            else:
+                model_kwargs["torch_dtype"] = torch.float32
+
+            model = AutoModelForCausalLM.from_pretrained(
+                self._model_name,
+                **model_kwargs,
+            ).eval()
+
+            if self._device.type != "cuda":
+                model.to(self._device)
+            return model
+
+        load_mode = self._config.generator_load_mode
+        torch_dtype = _resolve_torch_dtype(self._config.generator_dtype)
+
         model_kwargs: dict[str, Any] = {
             "local_files_only": True,
             "trust_remote_code": True,
         }
-        if self._device.type == "cuda":
-            model_kwargs["dtype"] = torch.float16
-            model_kwargs["device_map"] = "auto"
-        else:
-            model_kwargs["dtype"] = torch.float32
 
-        self._model = AutoModelForCausalLM.from_pretrained(
-            self._model_name,
-            **model_kwargs,
-        ).eval()
+        if load_mode == "standard":
+            if torch_dtype is None:
+                model_kwargs["torch_dtype"] = (
+                    torch.float16 if self._device.type == "cuda" else torch.float32
+                )
+            else:
+                model_kwargs["torch_dtype"] = torch_dtype
+
+            if self._device.type == "cuda" and self._config.generator_device_map is not None:
+                model_kwargs["device_map"] = self._config.generator_device_map
+
+            model = AutoModelForCausalLM.from_pretrained(
+                self._model_name,
+                **model_kwargs,
+            ).eval()
+
+            if self._device.type != "cuda":
+                model.to(self._device)
+            return model
 
         if self._device.type != "cuda":
-            self._model.to(self._device)
+            raise RuntimeError(
+                f"{load_mode} requested, but CUDA is not available. "
+                "Use generator_load_mode='standard' for CPU-only execution."
+            )
+
+        if load_mode == "bnb_8bit":
+            model_kwargs["quantization_config"] = BitsAndBytesConfig(
+                load_in_8bit=True,
+                llm_int8_enable_fp32_cpu_offload=self._config.bnb_int8_enable_fp32_cpu_offload,
+            )
+            model_kwargs["device_map"] = self._config.generator_device_map or "auto"
+            return AutoModelForCausalLM.from_pretrained(
+                self._model_name,
+                **model_kwargs,
+            ).eval()
+
+        if load_mode == "bnb_4bit":
+            compute_dtype = torch_dtype or torch.bfloat16
+            model_kwargs["quantization_config"] = BitsAndBytesConfig(
+                load_in_4bit=True,
+                bnb_4bit_quant_type=self._config.bnb_4bit_quant_type,
+                bnb_4bit_use_double_quant=self._config.bnb_4bit_use_double_quant,
+                bnb_4bit_compute_dtype=compute_dtype,
+            )
+            model_kwargs["device_map"] = self._config.generator_device_map or "auto"
+            return AutoModelForCausalLM.from_pretrained(
+                self._model_name,
+                **model_kwargs,
+            ).eval()
+
+        raise ValueError(f"Unsupported generator_load_mode: {load_mode}")
 
     @property
     def device(self) -> torch.device:
@@ -257,6 +364,20 @@ class LocalQwenGenerator:
             return text
         return self._tokenizer.decode(token_ids[:max_tokens], skip_special_tokens=True).strip()
 
+    def _apply_chat_template(
+        self,
+        messages: list[dict[str, str]],
+        *,
+        enable_thinking: bool,
+    ) -> str:
+        """Build a Qwen chat prompt with explicit thinking control."""
+        return self._tokenizer.apply_chat_template(
+            messages,
+            tokenize=False,
+            add_generation_prompt=True,
+            enable_thinking=enable_thinking,
+        )
+
     def build_prompt(
             self,
             *,
@@ -264,6 +385,7 @@ class LocalQwenGenerator:
             system_prompt: str,
             answer_instruction: str,
             context: str | None = None,
+            enable_thinking: bool = False
     ) -> str:
         """Build a chat prompt for grounded or direct answering."""
         if context:
@@ -294,6 +416,7 @@ class LocalQwenGenerator:
                 messages,
                 tokenize=False,
                 add_generation_prompt=True,
+                enable_thinking=enable_thinking,
             )
 
         return (
@@ -305,14 +428,16 @@ class LocalQwenGenerator:
         )
 
     def generate_from_prompt(
-            self,
-            prompt: str,
-            *,
-            max_new_tokens: int,
-            temperature: float,
-            top_p: float,
-            repetition_penalty: float,
-    ) -> str:
+        self,
+        prompt: str,
+        *,
+        max_new_tokens: int,
+        temperature: float,
+        top_p: float,
+        repetition_penalty: float,
+        enable_thinking: bool = False,
+        return_thinking: bool = False,
+    ) -> GeneratedText:
         """Generate a completion for a prepared prompt."""
         inputs = self._tokenizer(prompt, return_tensors="pt")
         inputs = {key: value.to(self._model.device) for key, value in inputs.items()}
@@ -334,18 +459,39 @@ class LocalQwenGenerator:
 
         prompt_length = inputs["input_ids"].shape[1]
         generated_ids = output_ids[0][prompt_length:]
-        answer = self._tokenizer.decode(generated_ids, skip_special_tokens=True).strip()
-        return self._strip_reasoning(answer)
+        text = self._tokenizer.decode(generated_ids, skip_special_tokens=True).strip()
+
+        if enable_thinking:
+            thinking_content, answer, thinking_finished = self._split_reasoning_text(text)
+            if return_thinking:
+                return GeneratedText(
+                    answer=answer,
+                    thinking_content=thinking_content,
+                    thinking_finished=thinking_finished,
+                )
+            return GeneratedText(
+                answer=answer,
+                thinking_content=None,
+                thinking_finished=thinking_finished,
+            )
+
+        return GeneratedText(
+            answer=self._strip_reasoning(text),
+            thinking_content=None,
+            thinking_finished=False,
+        )
 
     def stream_from_prompt(
-            self,
-            prompt: str,
-            *,
-            max_new_tokens: int,
-            temperature: float,
-            top_p: float,
-            repetition_penalty: float,
-    ) -> Iterator[str]:
+        self,
+        prompt: str,
+        *,
+        max_new_tokens: int,
+        temperature: float,
+        top_p: float,
+        repetition_penalty: float,
+        enable_thinking: bool = False,
+        stream_thinking: bool = False,
+    ) -> Iterator[StreamEvent]:
         """Yield generated text chunks for a prepared prompt."""
         inputs = self._tokenizer(prompt, return_tensors="pt")
         inputs = {key: value.to(self._model.device) for key, value in inputs.items()}
@@ -378,30 +524,77 @@ class LocalQwenGenerator:
         worker = Thread(target=_run_generation)
         worker.start()
 
+        buffer = ""
+        thinking_done = not enable_thinking
+
         for chunk in streamer:
-            if chunk:
-                yield chunk
+            if not chunk:
+                continue
+
+            if thinking_done:
+                cleaned = chunk.replace("<think>", "").replace("</think>", "")
+                if cleaned:
+                    yield StreamEvent(kind="answer_token", text=cleaned)
+                continue
+
+            buffer += chunk
+            buffer = buffer.replace("<think>", "")
+
+            end_index = buffer.find("</think>")
+            if end_index >= 0:
+                thinking_part = buffer[:end_index]
+                answer_part = buffer[end_index + len("</think>"):]
+
+                if stream_thinking and thinking_part:
+                    yield StreamEvent(kind="thinking_token", text=thinking_part)
+
+                yield StreamEvent(kind="thinking_done")
+                thinking_done = True
+
+                if answer_part:
+                    yield StreamEvent(kind="answer_token", text=answer_part)
+
+                buffer = ""
+                continue
+
+            safe_length = max(0, len(buffer) - len("</think>"))
+            if safe_length > 0:
+                safe_text = buffer[:safe_length]
+                buffer = buffer[safe_length:]
+                if stream_thinking and safe_text:
+                    yield StreamEvent(kind="thinking_token", text=safe_text)
+
+        if buffer:
+            if thinking_done:
+                cleaned = buffer.replace("<think>", "").replace("</think>", "")
+                if cleaned:
+                    yield StreamEvent(kind="answer_token", text=cleaned)
+            elif stream_thinking:
+                yield StreamEvent(kind="thinking_token", text=buffer.replace("<think>", ""))
 
         worker.join()
 
     def generate_answer(
-            self,
-            *,
-            query: str,
-            system_prompt: str,
-            answer_instruction: str,
-            max_new_tokens: int,
-            temperature: float,
-            top_p: float,
-            repetition_penalty: float,
-            context: str | None = None,
-    ) -> str:
+        self,
+        *,
+        query: str,
+        system_prompt: str,
+        answer_instruction: str,
+        max_new_tokens: int,
+        temperature: float,
+        top_p: float,
+        repetition_penalty: float,
+        context: str | None = None,
+        enable_thinking: bool = False,
+        return_thinking: bool = False,
+    ) -> GeneratedText:
         """Generate an answer with or without retrieved context."""
         prompt = self.build_prompt(
             query=query,
             context=context,
             system_prompt=system_prompt,
             answer_instruction=answer_instruction,
+            enable_thinking=enable_thinking,
         )
         return self.generate_from_prompt(
             prompt,
@@ -409,6 +602,8 @@ class LocalQwenGenerator:
             temperature=temperature,
             top_p=top_p,
             repetition_penalty=repetition_penalty,
+            enable_thinking=enable_thinking,
+            return_thinking=return_thinking,
         )
 
     def build_chat_prompt(
@@ -417,6 +612,7 @@ class LocalQwenGenerator:
             query: str,
             system_prompt: str,
             chat_instruction: str,
+            enable_thinking: bool = False
     ) -> str:
         """Build a normal chat prompt without retrieved context."""
         messages = [
@@ -438,6 +634,7 @@ class LocalQwenGenerator:
                 messages,
                 tokenize=False,
                 add_generation_prompt=True,
+                enable_thinking=enable_thinking,
             )
 
         return (
@@ -450,21 +647,24 @@ class LocalQwenGenerator:
         )
 
     def generate_chat_answer(
-            self,
-            *,
-            query: str,
-            system_prompt: str,
-            chat_instruction: str,
-            max_new_tokens: int,
-            temperature: float,
-            top_p: float,
-            repetition_penalty: float,
-    ) -> str:
+        self,
+        *,
+        query: str,
+        system_prompt: str,
+        chat_instruction: str,
+        max_new_tokens: int,
+        temperature: float,
+        top_p: float,
+        repetition_penalty: float,
+        enable_thinking: bool = False,
+        return_thinking: bool = False,
+    ) -> GeneratedText:
         """Generate a direct answer without retrieval context."""
         prompt = self.build_chat_prompt(
             query=query,
             system_prompt=system_prompt,
             chat_instruction=chat_instruction,
+            enable_thinking=enable_thinking,
         )
         return self.generate_from_prompt(
             prompt,
@@ -472,13 +672,9 @@ class LocalQwenGenerator:
             temperature=temperature,
             top_p=top_p,
             repetition_penalty=repetition_penalty,
+            enable_thinking=enable_thinking,
+            return_thinking=return_thinking,
         )
-
-    @staticmethod
-    def _strip_reasoning(text: str) -> str:
-        """Remove visible reasoning tags if the model emits them."""
-        cleaned = re.sub(r"<think>.*?</think>", "", text, flags=re.DOTALL | re.IGNORECASE)
-        return cleaned.strip()
 
     def generate_structured_json(
         self,
@@ -489,27 +685,31 @@ class LocalQwenGenerator:
         temperature: float = 0.0,
         top_p: float = 1.0,
         repetition_penalty: float = 1.0,
+        enable_thinking: bool = False,
     ) -> dict[str, Any]:
         """Generate a JSON object from the model and parse the first valid object found."""
-
         prompt = self.build_messages_prompt(
             system_prompt=system_prompt,
             user_prompt=user_prompt,
+            enable_thinking=enable_thinking,
         )
-        text = self.generate_from_prompt(
+        generated = self.generate_from_prompt(
             prompt,
             max_new_tokens=max_new_tokens,
             temperature=temperature,
             top_p=top_p,
             repetition_penalty=repetition_penalty,
+            enable_thinking=enable_thinking,
+            return_thinking=False,
         )
-        return self._extract_json(text)
+        return self._extract_json(generated.answer)
     
     def build_messages_prompt(
         self,
         *,
         system_prompt: str,
         user_prompt: str,
+        enable_thinking: bool = False
     ) -> str:
         """Build a generic chat-form prompt from explicit system and user content."""
 
@@ -529,6 +729,7 @@ class LocalQwenGenerator:
                 messages,
                 tokenize=False,
                 add_generation_prompt=True,
+                enable_thinking=enable_thinking,
             )
 
         return (
@@ -540,9 +741,36 @@ class LocalQwenGenerator:
         )
     
     @staticmethod
+    def _split_reasoning_text(text: str) -> tuple[str | None, str, bool]:
+        """Split Qwen output into thinking text and final answer."""
+        cleaned = text.strip()
+
+        if "</think>" in cleaned:
+            thinking_raw, answer = cleaned.rsplit("</think>", 1)
+            thinking = thinking_raw.replace("<think>", "").strip() or None
+            return thinking, answer.strip(), True
+
+        if "<think>" in cleaned:
+            thinking = cleaned.replace("<think>", "").strip() or None
+            return thinking, "", False
+
+        return None, cleaned, False
+    
+    @staticmethod
+    def _strip_reasoning(text: str) -> str:
+        """Remove visible reasoning tags if they are present."""
+        cleaned = re.sub(
+            r"<think>.*?</think>",
+            "",
+            text,
+            flags=re.DOTALL | re.IGNORECASE,
+        )
+        cleaned = cleaned.replace("<think>", "").replace("</think>", "")
+        return cleaned.strip()
+
+    @staticmethod
     def _extract_json(text: str) -> dict[str, Any]:
         """Extract and parse the first top-level JSON object from model output."""
-
         start = text.find("{")
         if start < 0:
             raise ValueError("Model output does not contain a JSON object")
@@ -582,7 +810,6 @@ class LocalQwenGenerator:
         candidate = text[start:end]
         try:
             import json
-
             payload = json.loads(candidate)
         except Exception as exc:
             raise ValueError("Failed to parse JSON from model output") from exc

@@ -65,6 +65,9 @@ export type QueryStreamStart = {
 // Final streaming event: complete answer text and timing information.
 export type QueryStreamDone = {
   answer: string;
+  thinking_content?: string | null;
+  thinking_finished?: boolean;
+  reasoning_mode?: string;
   timings: {
     retrieval_seconds: number;
     generation_seconds: number;
@@ -75,7 +78,9 @@ export type QueryStreamDone = {
 // All event shapes that can arrive over the streaming query endpoint.
 export type QueryStreamEvent =
   | { type: "start"; data: QueryStreamStart }
-  | { type: "token"; data: { text: string } }
+  | { type: "answer_token"; data: { text: string } }
+  | { type: "thinking_token"; data: { text: string } }
+  | { type: "thinking_done"; data: Record<string, never> }
   | { type: "done"; data: QueryStreamDone }
   | { type: "error"; data: { message: string } };
 

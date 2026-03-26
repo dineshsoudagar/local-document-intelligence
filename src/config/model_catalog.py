@@ -1,5 +1,3 @@
-"""Registry of local model and artifact locations used by the application."""
-
 from __future__ import annotations
 
 from dataclasses import dataclass, field
@@ -32,59 +30,91 @@ class ArtifactEntry:
         return Path(project_root).resolve() / models_root / self.relative_dir
 
 
+@dataclass(frozen=True, slots=True)
+class PipelineModels:
+    """Selected assets for each pipeline role."""
+
+    embedder_key: str = "qwen3_embedding_0_6b"
+    reranker_key: str = "qwen3_reranker_0_6b"
+    generator_key: str = "qwen3_4b"
+    picture_description_key: str = "smolvlm_256m_instruct"
+    docling_artifacts_key: str = "docling_artifacts"
+    chunk_tokenizer_key: str | None = None
+
+    def effective_chunk_tokenizer_key(self) -> str:
+        """Return the tokenizer asset key used for chunking."""
+        return self.chunk_tokenizer_key or self.embedder_key
+
+    def required_asset_keys(self) -> tuple[str, ...]:
+        """Return the deduplicated asset keys required by the selected pipelines."""
+        keys = [
+            self.embedder_key,
+            self.reranker_key,
+            self.generator_key,
+            self.picture_description_key,
+            self.docling_artifacts_key,
+            self.effective_chunk_tokenizer_key(),
+        ]
+        return tuple(dict.fromkeys(keys))
+
+
+def default_pipeline_models() -> PipelineModels:
+    """Return the default pipeline model selection."""
+    return PipelineModels()
+
+
 @dataclass(slots=True)
 class ModelCatalog:
-    """Central registry for all local model and artifact locations used by the app."""
+    """Registry of available local models and artifacts used by the application."""
 
     models_root: str = "models"
 
-    embedder: ModelEntry = field(
-        default_factory=lambda: ModelEntry(
-            key="embedder",
-            repo_id="Qwen/Qwen3-Embedding-0.6B",
-            relative_dir="embedders/qwen3-embedding-0.6b",
+    hf_model_entries: tuple[ModelEntry, ...] = field(
+        default_factory=lambda: (
+            ModelEntry(
+                key="qwen3_embedding_0_6b",
+                repo_id="Qwen/Qwen3-Embedding-0.6B",
+                relative_dir="embedders/qwen3-embedding-0.6b",
+            ),
+            ModelEntry(
+                key="qwen3_reranker_0_6b",
+                repo_id="Qwen/Qwen3-Reranker-0.6B",
+                relative_dir="rerankers/qwen3-reranker-0.6b",
+            ),
+            ModelEntry(
+                key="qwen3_4b_instruct_2507",
+                repo_id="Qwen/Qwen3-4B-Instruct-2507",
+                relative_dir="generators/qwen3-4b-instruct-2507",
+            ),
+            ModelEntry(
+                key="smolvlm_256m_instruct",
+                repo_id="HuggingFaceTB/SmolVLM-256M-Instruct",
+                relative_dir="vlm/smolvlm-256m-instruct",
+            ),
+            ModelEntry(
+                key="qwen3_4b",
+                repo_id="Qwen/Qwen3-4B",
+                relative_dir="generators/qwen3-4b",
+            ),
         )
     )
-    reranker: ModelEntry = field(
-        default_factory=lambda: ModelEntry(
-            key="reranker",
-            repo_id="Qwen/Qwen3-Reranker-0.6B",
-            relative_dir="rerankers/qwen3-reranker-0.6b",
-        )
-    )
-    generator: ModelEntry = field(
-        default_factory=lambda: ModelEntry(
-            key="generator",
-            repo_id="Qwen/Qwen3-4B-Instruct-2507",
-            relative_dir="generators/qwen3-4b-instruct-2507",
-        )
-    )
-    picture_description: ModelEntry = field(
-        default_factory=lambda: ModelEntry(
-            key="picture_description",
-            repo_id="HuggingFaceTB/SmolVLM-256M-Instruct",
-            relative_dir="vlm/smolvlm-256m-instruct",
-        )
-    )
-    docling_artifacts: ArtifactEntry = field(
-        default_factory=lambda: ArtifactEntry(
-            key="docling_artifacts",
-            relative_dir="docling/artifacts",
+
+    artifact_entries: tuple[ArtifactEntry, ...] = field(
+        default_factory=lambda: (
+            ArtifactEntry(
+                key="docling_artifacts",
+                relative_dir="docling/artifacts",
+            ),
         )
     )
 
     def hf_models(self) -> tuple[ModelEntry, ...]:
         """Return all Hugging Face-backed model entries."""
-        return (
-            self.embedder,
-            self.reranker,
-            self.generator,
-            self.picture_description,
-        )
+        return self.hf_model_entries
 
     def artifacts(self) -> tuple[ArtifactEntry, ...]:
         """Return all non-Hugging Face artifact entries."""
-        return (self.docling_artifacts,)
+        return self.artifact_entries
 
     def all(self) -> tuple[ModelEntry | ArtifactEntry, ...]:
         """Return all configured models and artifact bundles."""
@@ -115,34 +145,24 @@ class ModelCatalog:
             raise KeyError(f"Key '{key}' is not an artifact entry")
         return entry
 
-    def local_paths(self, project_root: str | Path) -> dict[str, str]:
-        """Return resolved local paths for all configured assets."""
+    def resolve_hf_path(self, key: str, project_root: str | Path) -> Path:
+        """Resolve the local directory for a Hugging Face model key."""
+        return self.get_hf_model(key).resolve_dir(project_root, self.models_root)
+
+    def resolve_artifact_path(self, key: str, project_root: str | Path) -> Path:
+        """Resolve the local directory for a non-Hugging Face artifact key."""
+        return self.get_artifact(key).resolve_dir(project_root, self.models_root)
+
+    def local_paths(
+        self,
+        project_root: str | Path,
+        keys: tuple[str, ...] | None = None,
+    ) -> dict[str, str]:
+        """Return resolved local paths for selected configured assets."""
+        selected_keys = set(keys or self.downloadable_keys())
         root = Path(project_root).resolve()
         return {
             entry.key: str(entry.resolve_dir(root, self.models_root))
             for entry in self.all()
+            if entry.key in selected_keys
         }
-
-    def embedder_path(self, project_root: str | Path) -> Path:
-        """Return the resolved local embedder directory."""
-        return self.embedder.resolve_dir(project_root, self.models_root)
-
-    def reranker_path(self, project_root: str | Path) -> Path:
-        """Return the resolved local reranker directory."""
-        return self.reranker.resolve_dir(project_root, self.models_root)
-
-    def generator_path(self, project_root: str | Path) -> Path:
-        """Return the resolved local generator directory."""
-        return self.generator.resolve_dir(project_root, self.models_root)
-
-    def picture_description_path(self, project_root: str | Path) -> Path:
-        """Return the resolved local picture-description model directory."""
-        return self.picture_description.resolve_dir(project_root, self.models_root)
-
-    def docling_artifacts_path(self, project_root: str | Path) -> Path:
-        """Return the resolved local Docling artifacts directory."""
-        return self.docling_artifacts.resolve_dir(project_root, self.models_root)
-
-    def chunk_tokenizer_path(self, project_root: str | Path) -> Path:
-        """Return the tokenizer path used for chunking."""
-        return self.embedder_path(project_root)

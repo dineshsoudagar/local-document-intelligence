@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from pydantic import BaseModel, field_validator
-
+from typing import Literal
 
 class QueryRequest(BaseModel):
     """Request payload for grounded and chat query operations."""
@@ -11,6 +11,8 @@ class QueryRequest(BaseModel):
     query: str
     mode: str = "grounded"
     doc_ids: list[str] | None = None
+    reasoning_mode: Literal["think", "no_think"] = "no_think"
+    stream_thinking: bool = False
 
     @field_validator("query")
     @classmethod
@@ -40,6 +42,14 @@ class QueryRequest(BaseModel):
         cleaned = [item.strip() for item in value if item and item.strip()]
         return cleaned or None
 
+    @field_validator("reasoning_mode")
+    @classmethod
+    def validate_reasoning_mode(cls, value: str) -> str:
+        """Normalize and validate the reasoning mode."""
+        value = value.strip().lower()
+        if value not in {"think", "no_think"}:
+            raise ValueError("reasoning_mode must be one of: think, no_think.")
+        return value
 
 class QueryTimingResponse(BaseModel):
     """Timing breakdown for query execution."""
@@ -68,3 +78,6 @@ class QueryResponse(BaseModel):
     used_context_tokens: int
     retrieved_chunk_count: int
     timings: QueryTimingResponse
+    reasoning_mode: str
+    thinking_content: str | None = None
+    thinking_finished: bool = False
