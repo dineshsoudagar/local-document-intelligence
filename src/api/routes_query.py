@@ -25,7 +25,9 @@ router = APIRouter()
 
 def _event_line(event_type: str, data: object) -> bytes:
     """Serialize one NDJSON event line for the streaming response."""
-    return (json.dumps({"type": event_type, "data": data}, ensure_ascii=False) + "\n").encode("utf-8")
+    return (
+        json.dumps({"type": event_type, "data": data}, ensure_ascii=False) + "\n"
+    ).encode("utf-8")
 
 
 def _attach_original_filenames(
@@ -152,6 +154,7 @@ def query_documents(
             query=request.query,
             mode=request.mode,
             doc_ids=request.doc_ids,
+            reasoning_mode=request.reasoning_mode,
         )
     except ValueError as exc:
         raise HTTPException(
@@ -176,11 +179,14 @@ def stream_query_documents(
     registry: DocumentRegistry = Depends(get_document_registry_from_state),
 ) -> StreamingResponse:
     """Stream query output as NDJSON events."""
+    print(f"Received query: {request.query}, mode: {request.mode}, doc_ids: {request.doc_ids}, reasoning_mode: {request.reasoning_mode}, stream_thinking: {request.stream_thinking}")  # Debug log      
     try:
-        start_payload, token_stream = answer_service.stream(
+        start_payload, event_stream = answer_service.stream(
             query=request.query,
             mode=request.mode,
             doc_ids=request.doc_ids,
+            reasoning_mode=request.reasoning_mode,
+            stream_thinking=request.stream_thinking,
         )
     except ValueError as exc:
         raise HTTPException(
@@ -195,20 +201,37 @@ def stream_query_documents(
 
     def body() -> Iterator[bytes]:
         """Yield the NDJSON event stream for one query."""
+        thinking_parts: list[str] = []
         answer_parts: list[str] = []
+        thinking_finished = request.reasoning_mode == "no_think"
         generation_started_at = time.perf_counter()
 
         start_data = start_payload.to_dict()
-        start_data["sources"] = _collapse_sources_to_references(start_data["sources"], registry)
+        start_data["sources"] = _collapse_sources_to_references(
+            start_data["sources"],
+            registry,
+        )
         yield _event_line("start", start_data)
 
         try:
-            for text_piece in token_stream:
-                if not text_piece:
+            for event in event_stream:
+                if event.kind == "thinking_token":
+                    if event.text:
+                        thinking_parts.append(event.text)
+                        yield _event_line("thinking_token", {"text": event.text})
                     continue
 
-                answer_parts.append(text_piece)
-                yield _event_line("token", {"text": text_piece})
+                if event.kind == "thinking_done":
+                    thinking_finished = True
+                    yield _event_line("thinking_done", {})
+                    continue
+
+                if event.kind == "answer_token":
+                    if event.text:
+                        answer_parts.append(event.text)
+                        yield _event_line("answer_token", {"text": event.text})
+                    continue
+
         except Exception as exc:
             yield _event_line("error", {"message": f"Query failed: {exc}"})
             return
@@ -218,6 +241,9 @@ def stream_query_documents(
             "done",
             {
                 "answer": "".join(answer_parts),
+                "thinking_content": "".join(thinking_parts) or None,
+                "thinking_finished": thinking_finished,
+                "reasoning_mode": request.reasoning_mode,
                 "timings": {
                     "retrieval_seconds": start_payload.retrieval_seconds,
                     "generation_seconds": generation_seconds,

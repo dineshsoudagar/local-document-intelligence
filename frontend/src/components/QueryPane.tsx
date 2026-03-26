@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import type { ChatMessage, DocumentItem, QuerySource, QueryStatus, UiQueryMode } from "../types";
+import { MarkdownText } from "./MarkdownText";
 
 type QueryPaneProps = {
   documents: DocumentItem[];
@@ -240,7 +241,11 @@ export function QueryPane({
                       {message.role === "user" ? "You" : "Assistant"}
                     </div>
                     <div className="chat-bubble-text">
-                      {message.content || (message.status === "streaming" ? "Thinking..." : "")}
+                      {message.content ? (
+                        <MarkdownText content={message.content} />
+                      ) : (
+                        message.status === "streaming" ? "Thinking..." : ""
+                      )}
                     </div>
                   </div>
                   {message.role === "assistant" && message.sources && message.sources.length > 0 && (

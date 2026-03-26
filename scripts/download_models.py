@@ -11,11 +11,29 @@ from typing import Any, Iterable
 
 from huggingface_hub import snapshot_download
 
-from src.config.model_catalog import ArtifactEntry, ModelCatalog, ModelEntry
+from src.config.model_catalog import (
+    ArtifactEntry,
+    ModelCatalog,
+    ModelEntry,
+    default_pipeline_models,
+)
 
 
 MODEL_CATALOG = ModelCatalog()
+PIPELINE_MODELS = default_pipeline_models()
 
+HF_CONFIG_MARKERS = (
+    "config.json",
+    "tokenizer_config.json",
+    "preprocessor_config.json",
+)
+
+HF_WEIGHT_PATTERNS = (
+    "*.safetensors",
+    "*.bin",
+    "*.onnx",
+    "*.gguf",
+)
 
 def parse_args() -> argparse.Namespace:
     """Parse CLI arguments for local model and artifact download."""
@@ -35,6 +53,12 @@ def parse_args() -> argparse.Namespace:
         nargs="+",
         choices=list(MODEL_CATALOG.downloadable_keys()),
         help="Subset of configured assets to download.",
+    )
+
+    cli.add_argument(
+        "--all",
+        action="store_true",
+        help="Download every registered asset instead of only the selected pipeline assets.",
     )
     cli.add_argument(
         "--force",
@@ -129,19 +153,126 @@ def parse_args() -> argparse.Namespace:
     return cli.parse_args()
 
 
-def select_assets(only: Iterable[str] | None) -> tuple[list[ModelEntry], list[ArtifactEntry]]:
-    """Select configured assets by key."""
-    if not only:
-        return list(MODEL_CATALOG.hf_models()), list(MODEL_CATALOG.artifacts())
+def select_assets(
+    only: Iterable[str] | None,
+    *,
+    all_assets: bool,
+) -> tuple[list[ModelEntry], list[ArtifactEntry], tuple[str, ...]]:
+    """Select assets by explicit keys or by the configured pipeline defaults."""
+    if only:
+        selected_keys = tuple(dict.fromkeys(only))
+    elif all_assets:
+        selected_keys = MODEL_CATALOG.downloadable_keys()
+    else:
+        selected_keys = PIPELINE_MODELS.required_asset_keys()
 
-    only_keys = set(only)
+    selected_key_set = set(selected_keys)
     selected_models = [
-        entry for entry in MODEL_CATALOG.hf_models() if entry.key in only_keys
+        entry for entry in MODEL_CATALOG.hf_models() if entry.key in selected_key_set
     ]
     selected_artifacts = [
-        entry for entry in MODEL_CATALOG.artifacts() if entry.key in only_keys
+        entry for entry in MODEL_CATALOG.artifacts() if entry.key in selected_key_set
     ]
-    return selected_models, selected_artifacts
+    return selected_models, selected_artifacts, selected_keys
+
+
+def _has_any_matching_file(root: Path, patterns: Iterable[str]) -> bool:
+    """Return whether the directory tree contains a file matching any pattern."""
+    if not root.is_dir():
+        return False
+
+    for pattern in patterns:
+        if any(path.is_file() for path in root.rglob(pattern)):
+            return True
+    return False
+
+
+def is_hf_model_downloaded(entry: ModelEntry, project_root: Path) -> bool:
+    """Return whether a Hugging Face model appears to be fully available locally."""
+    target_dir = entry.resolve_dir(
+        project_root=project_root,
+        models_root=MODEL_CATALOG.models_root,
+    )
+    if not target_dir.is_dir():
+        return False
+
+    has_config = any((target_dir / marker).is_file() for marker in HF_CONFIG_MARKERS)
+    if not has_config:
+        return False
+
+    return _has_any_matching_file(target_dir, HF_WEIGHT_PATTERNS)
+
+
+def is_artifact_downloaded(entry: ArtifactEntry, project_root: Path) -> bool:
+    """Return whether a non-Hugging Face artifact bundle exists locally."""
+    target_dir = entry.resolve_dir(
+        project_root=project_root,
+        models_root=MODEL_CATALOG.models_root,
+    )
+    if not target_dir.is_dir():
+        return False
+
+    return any(target_dir.rglob("*"))
+
+
+def build_existing_record(
+    entry: ModelEntry | ArtifactEntry,
+    project_root: Path,
+) -> dict[str, Any]:
+    """Return a manifest record for an asset that is already available locally."""
+    target_dir = entry.resolve_dir(
+        project_root=project_root,
+        models_root=MODEL_CATALOG.models_root,
+    )
+
+    if isinstance(entry, ModelEntry):
+        return {
+            "key": entry.key,
+            "source_type": "huggingface",
+            "repo_id": entry.repo_id,
+            "revision": entry.revision,
+            "target_dir": str(target_dir.resolve()),
+            "snapshot_path": str(target_dir.resolve()),
+        }
+
+    return {
+        "key": entry.key,
+        "source_type": "docling",
+        "target_dir": str(target_dir.resolve()),
+        "options": {
+            "with_layout": None,
+            "with_tableformer": None,
+            "with_code_formula": None,
+            "with_picture_classifier": None,
+            "with_rapidocr": None,
+            "with_easyocr": None,
+        },
+    }
+
+
+def partition_selected_assets_by_presence(
+    project_root: Path,
+    selected_models: Iterable[ModelEntry],
+    selected_artifacts: Iterable[ArtifactEntry],
+) -> tuple[list[dict[str, Any]], list[ModelEntry], list[ArtifactEntry]]:
+    """Split selected assets into already-present records and missing downloads."""
+    existing_records: list[dict[str, Any]] = []
+    missing_models: list[ModelEntry] = []
+    missing_artifacts: list[ArtifactEntry] = []
+
+    for entry in selected_models:
+        if is_hf_model_downloaded(entry, project_root):
+            existing_records.append(build_existing_record(entry, project_root))
+        else:
+            missing_models.append(entry)
+
+    for entry in selected_artifacts:
+        if is_artifact_downloaded(entry, project_root):
+            existing_records.append(build_existing_record(entry, project_root))
+        else:
+            missing_artifacts.append(entry)
+
+    return existing_records, missing_models, missing_artifacts
 
 
 def ensure_empty_dir(path: Path) -> None:
@@ -274,11 +405,31 @@ def main() -> None:
     models_root.mkdir(parents=True, exist_ok=True)
 
     token = os.getenv(args.token_env)
-    selected_models, selected_artifacts = select_assets(args.only)
+    selected_models, selected_artifacts, selected_keys = select_assets(
+        args.only,
+        all_assets=args.all,
+    )
 
     records: list[dict[str, Any]] = []
+    models_to_download = selected_models
+    artifacts_to_download = selected_artifacts
 
-    for entry in selected_models:
+    if not args.force:
+        (
+            existing_records,
+            models_to_download,
+            artifacts_to_download,
+        ) = partition_selected_assets_by_presence(
+            project_root,
+            selected_models,
+            selected_artifacts,
+        )
+        records.extend(existing_records)
+
+        for record in existing_records:
+            print(f"Skipping {record['key']}: already present at {record['target_dir']}")
+
+    for entry in models_to_download:
         print(f"Downloading {entry.key}: {entry.repo_id}")
         record = download_hf_model(
             entry=entry,
@@ -289,7 +440,7 @@ def main() -> None:
         records.append(record)
         print(f"Saved to: {record['target_dir']}")
 
-    for entry in selected_artifacts:
+    for entry in artifacts_to_download:
         print(f"Downloading {entry.key}: Docling offline artifacts")
         record = download_docling_artifacts(
             entry=entry,
@@ -316,7 +467,8 @@ def main() -> None:
         "project_root": str(project_root),
         "models_root": str(models_root.resolve()),
         "manifest_path": str(manifest_path.resolve()),
-        "local_paths": MODEL_CATALOG.local_paths(project_root),
+        "selected_keys": selected_keys,
+        "local_paths": MODEL_CATALOG.local_paths(project_root, selected_keys),
     }
     print(json.dumps(summary, indent=2))
 

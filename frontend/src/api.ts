@@ -93,8 +93,17 @@ export async function streamQuery(
       return;
     }
 
-    if (event.type === "token") {
+    if (event.type === "answer_token") {
       handlers.onToken(event.data.text);
+      return;
+    }
+
+    if (event.type === "thinking_token" || event.type === "thinking_done") {
+      return;
+    }
+
+    if (event.type === "done") {
+      handlers.onDone(event.data);
       return;
     }
 
@@ -102,7 +111,7 @@ export async function streamQuery(
       throw new Error(event.data.message);
     }
 
-    handlers.onDone(event.data);
+    throw new Error(`Unsupported stream event type: ${(event as { type: string }).type}`);
   }
 
   while (true) {

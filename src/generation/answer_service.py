@@ -16,7 +16,7 @@ from src.config.retrieval_control_config import (
     RetrievalControlConfig,
 )
 from src.retrieval.qdrant_hybrid_index import QdrantHybridIndex, RetrievedChunk
-from src.retrieval.qwen_models import LocalQwenGenerator
+from src.retrieval.qwen_models import GeneratedText, LocalQwenGenerator, StreamEvent
 from src.retrieval.controller_service import AutoDecisionController
 
 @dataclass(slots=True)
@@ -42,6 +42,7 @@ class StreamStartPayload:
 
     query: str
     mode_used: str
+    reasoning_mode: str
     fallback_reason: str | None
     sources: list[AnswerSource]
     used_context_tokens: int
@@ -53,6 +54,7 @@ class StreamStartPayload:
         return {
             "query": self.query,
             "mode_used": self.mode_used,
+            "reasoning_mode": self.reasoning_mode,
             "fallback_reason": self.fallback_reason,
             "sources": [source.to_dict() for source in self.sources],
             "used_context_tokens": self.used_context_tokens,
@@ -71,6 +73,9 @@ class GroundedAnswerResult:
     retrieved_chunk_count: int
     timings: AnswerTimings
     mode_used: str
+    reasoning_mode: str
+    thinking_content: str | None = None
+    thinking_finished: bool = False
     fallback_reason: str | None = None
 
     def to_dict(self, *, include_context: bool = False) -> dict[str, Any]:
@@ -79,6 +84,9 @@ class GroundedAnswerResult:
             "query": self.query,
             "answer": self.answer,
             "mode_used": self.mode_used,
+            "reasoning_mode": self.reasoning_mode,
+            "thinking_content": self.thinking_content,
+            "thinking_finished": self.thinking_finished,
             "fallback_reason": self.fallback_reason,
             "sources": [source.to_dict() for source in self.context.sources],
             "used_context_tokens": self.context.used_tokens,
@@ -111,27 +119,36 @@ class GroundedAnswerService:
             self._generator = LocalQwenGenerator(self._config.generator_model_path)
         return self._generator
 
-    def answer(self, query: str, *, mode: str = "grounded",
-               doc_ids: list[str] | None = None, ) -> GroundedAnswerResult:
+    def answer(
+        self,
+        query: str,
+        *,
+        mode: str = "grounded",
+        doc_ids: list[str] | None = None,
+        reasoning_mode: str = "no_think",
+    ) -> GroundedAnswerResult:
         """Return a buffered answer for grounded, chat, or auto mode."""
         self._validate_mode(mode)
+        resolved_reasoning_mode = self._config.resolve_reasoning_mode(reasoning_mode)
         overall_started_at = time.perf_counter()
 
         if mode == "chat":
-            answer_text, generation_seconds = self._generate_text(
+            generated, generation_seconds = self._generate_text(
                 query=query,
                 mode="chat",
                 context_text=None,
+                reasoning_mode=resolved_reasoning_mode,
             )
             return self._build_result(
                 query=query,
-                answer_text=answer_text,
+                generated=generated,
                 context=self._empty_context(),
                 retrieved_chunk_count=0,
                 retrieval_seconds=0.0,
                 generation_seconds=generation_seconds,
                 overall_started_at=overall_started_at,
                 mode_used="chat",
+                reasoning_mode=resolved_reasoning_mode,
             )
 
         retrieved_chunks, retrieval_seconds = self._retrieve_chunks(
@@ -141,33 +158,40 @@ class GroundedAnswerService:
         resolved_mode, fallback_reason = self._resolve_mode(mode, retrieved_chunks)
 
         if resolved_mode == "chat":
-            answer_text, generation_seconds = self._generate_text(
+            generated, generation_seconds = self._generate_text(
                 query=query,
                 mode="chat",
                 context_text=None,
+                reasoning_mode=resolved_reasoning_mode,
             )
             return self._build_result(
                 query=query,
-                answer_text=answer_text,
+                generated=generated,
                 context=self._empty_context(),
                 retrieved_chunk_count=len(retrieved_chunks),
                 retrieval_seconds=retrieval_seconds,
                 generation_seconds=generation_seconds,
                 overall_started_at=overall_started_at,
                 mode_used="chat",
+                reasoning_mode=resolved_reasoning_mode,
                 fallback_reason=fallback_reason,
             )
 
         if not retrieved_chunks:
             return self._build_result(
                 query=query,
-                answer_text="No relevant chunks were retrieved.",
+                generated=GeneratedText(
+                    answer="No relevant chunks were retrieved.",
+                    thinking_content=None,
+                    thinking_finished=(resolved_reasoning_mode == "no_think"),
+                ),
                 context=self._empty_context(),
                 retrieved_chunk_count=0,
                 retrieval_seconds=retrieval_seconds,
                 generation_seconds=0.0,
                 overall_started_at=overall_started_at,
                 mode_used="grounded",
+                reasoning_mode=resolved_reasoning_mode,
             )
 
         grounded_context = self._build_context(retrieved_chunks)
@@ -176,37 +200,49 @@ class GroundedAnswerService:
                 "Retrieved chunks were available, but no context could fit the prompt budget"
             )
 
-        answer_text, generation_seconds = self._generate_text(
+        generated, generation_seconds = self._generate_text(
             query=query,
             mode="grounded",
             context_text=grounded_context.text,
+            reasoning_mode=resolved_reasoning_mode,
         )
         return self._build_result(
             query=query,
-            answer_text=answer_text,
+            generated=generated,
             context=grounded_context,
             retrieved_chunk_count=len(retrieved_chunks),
             retrieval_seconds=retrieval_seconds,
             generation_seconds=generation_seconds,
             overall_started_at=overall_started_at,
             mode_used="grounded",
+            reasoning_mode=resolved_reasoning_mode,
         )
 
-    def stream(self, query: str, *, mode: str = "grounded",
-               doc_ids: list[str] | None = None, ) -> tuple[StreamStartPayload, Iterator[str]]:
+    def stream(
+        self,
+        query: str,
+        *,
+        mode: str = "grounded",
+        doc_ids: list[str] | None = None,
+        reasoning_mode: str = "no_think",
+        stream_thinking: bool = False,
+    ) -> tuple[StreamStartPayload, Iterator[StreamEvent]]:
         """Return response metadata and a streamed answer iterator."""
         self._validate_mode(mode)
-        print(f"Starting stream for query: {query} with mode: {mode} and doc_ids: {doc_ids}")
+        resolved_reasoning_mode = self._config.resolve_reasoning_mode(reasoning_mode)
+
         if mode == "chat":
             return self._build_stream_response(
                 query=query,
                 mode_used="chat",
+                reasoning_mode=resolved_reasoning_mode,
                 context=self._empty_context(),
                 retrieved_chunk_count=0,
                 retrieval_seconds=0.0,
                 fallback_reason=None,
+                stream_thinking=stream_thinking,
             )
-        
+
         if doc_ids is None and mode == "auto":
             decision = self._controller.decide(query)
             auto_decision = decision.decision
@@ -215,30 +251,31 @@ class GroundedAnswerService:
                 return self._build_stream_response(
                     query=query,
                     mode_used="chat",
+                    reasoning_mode=resolved_reasoning_mode,
                     context=self._empty_context(),
                     retrieved_chunk_count=0,
                     retrieval_seconds=0.0,
                     fallback_reason=reason,
+                    stream_thinking=stream_thinking,
                 )
-        
-        print(f"Running retrieval for query: {query} with doc_ids: {doc_ids}")
-        retrieved_chunks, retrieval_seconds = self._retrieve_chunks(
-                query,
-                doc_ids=doc_ids,
-            )
 
-        print(f"Retrieved {len(retrieved_chunks)} chunks in {retrieval_seconds:.2f} seconds for query: {query}")
+        retrieved_chunks, retrieval_seconds = self._retrieve_chunks(
+            query,
+            doc_ids=doc_ids,
+        )
+
         if not retrieved_chunks:
             start_payload = StreamStartPayload(
                 query=query,
                 mode_used="grounded",
+                reasoning_mode=resolved_reasoning_mode,
                 fallback_reason=None,
                 sources=[],
                 used_context_tokens=0,
                 retrieved_chunk_count=0,
                 retrieval_seconds=retrieval_seconds,
             )
-            return start_payload, self._empty_text_stream()
+            return start_payload, self._empty_stream_events()
 
         grounded_context = self._build_context(retrieved_chunks)
         if not grounded_context.text:
@@ -249,31 +286,13 @@ class GroundedAnswerService:
         return self._build_stream_response(
             query=query,
             mode_used="grounded",
+            reasoning_mode=resolved_reasoning_mode,
             context=grounded_context,
             retrieved_chunk_count=len(retrieved_chunks),
             retrieval_seconds=retrieval_seconds,
             fallback_reason=None,
+            stream_thinking=stream_thinking,
         )
-
-    def _build_stream_response(self, *, query: str, mode_used: str, context: GroundedContext,
-                               retrieved_chunk_count: int, retrieval_seconds: float,
-                               fallback_reason: str | None, ) -> tuple[StreamStartPayload, Iterator[str]]:
-        """Build stream metadata and the corresponding text iterator."""
-        start_payload = StreamStartPayload(
-            query=query,
-            mode_used=mode_used,
-            fallback_reason=fallback_reason,
-            sources=context.sources,
-            used_context_tokens=context.used_tokens,
-            retrieved_chunk_count=retrieved_chunk_count,
-            retrieval_seconds=retrieval_seconds,
-        )
-        text_stream = self._stream_text(
-            query=query,
-            mode=mode_used,
-            context_text=context.text or None,
-        )
-        return start_payload, text_stream
 
     def _retrieve_chunks(self, query: str, *,
                          doc_ids: list[str] | None = None) -> tuple[list[RetrievedChunk], float]:
@@ -296,28 +315,31 @@ class GroundedAnswerService:
         )
 
     def _generate_text(
-            self,
-            *,
-            query: str,
-            mode: str,
-            context_text: str | None,
-    ) -> tuple[str, float]:
-        """Generate one full answer string."""
+        self,
+        *,
+        query: str,
+        mode: str,
+        context_text: str | None,
+        reasoning_mode: str,
+    ) -> tuple[GeneratedText, float]:
         system_prompt, answer_instruction = self._prompts_for_mode(mode)
+        enable_thinking = self._config.thinking_enabled(reasoning_mode)
 
         started_at = time.perf_counter()
-        answer_text = self.generator.generate_answer(
+        result = self.generator.generate_answer(
             query=query,
             context=context_text,
             system_prompt=system_prompt,
             answer_instruction=answer_instruction,
-            max_new_tokens=self._config.max_new_tokens,
-            temperature=self._config.temperature,
-            top_p=self._config.top_p,
+            max_new_tokens=self._config.max_new_tokens_for(reasoning_mode),
+            temperature=self._config.temperature_for(reasoning_mode),
+            top_p=self._config.top_p_for(reasoning_mode),
             repetition_penalty=self._config.repetition_penalty,
+            enable_thinking=enable_thinking,
+            return_thinking=enable_thinking,
         )
         generation_seconds = time.perf_counter() - started_at
-        return answer_text, generation_seconds
+        return result, generation_seconds
 
     def _stream_text(
             self,
@@ -325,22 +347,28 @@ class GroundedAnswerService:
             query: str,
             mode: str,
             context_text: str | None,
-    ) -> Iterator[str]:
-        """Stream answer text incrementally."""
+            reasoning_mode: str,
+            stream_thinking: bool,
+    ) -> Iterator[StreamEvent]:
+        """Stream answer events incrementally."""
         system_prompt, answer_instruction = self._prompts_for_mode(mode)
+        enable_thinking = self._config.thinking_enabled(reasoning_mode)
 
         prompt = self.generator.build_prompt(
             query=query,
             context=context_text,
             system_prompt=system_prompt,
             answer_instruction=answer_instruction,
+            enable_thinking=enable_thinking,
         )
         return self.generator.stream_from_prompt(
             prompt,
-            max_new_tokens=self._config.max_new_tokens,
-            temperature=self._config.temperature,
-            top_p=self._config.top_p,
+            max_new_tokens=self._config.max_new_tokens_for(reasoning_mode),
+            temperature=self._config.temperature_for(reasoning_mode),
+            top_p=self._config.top_p_for(reasoning_mode),
             repetition_penalty=self._config.repetition_penalty,
+            enable_thinking=enable_thinking,
+            stream_thinking=stream_thinking,
         )
 
     def _resolve_mode(
@@ -375,13 +403,14 @@ class GroundedAnswerService:
             self,
             *,
             query: str,
-            answer_text: str,
+            generated: GeneratedText,
             context: GroundedContext,
             retrieved_chunk_count: int,
             retrieval_seconds: float,
             generation_seconds: float,
             overall_started_at: float,
             mode_used: str,
+            reasoning_mode: str,
             fallback_reason: str | None = None,
     ) -> GroundedAnswerResult:
         """Create a structured query result with timings."""
@@ -392,13 +421,48 @@ class GroundedAnswerService:
         )
         return GroundedAnswerResult(
             query=query,
-            answer=answer_text,
+            answer=generated.answer,
             context=context,
             retrieved_chunk_count=retrieved_chunk_count,
             timings=timings,
             mode_used=mode_used,
+            reasoning_mode=reasoning_mode,
+            thinking_content=generated.thinking_content,
+            thinking_finished=generated.thinking_finished,
             fallback_reason=fallback_reason,
         )
+
+    def _build_stream_response(
+            self,
+            *,
+            query: str,
+            mode_used: str,
+            reasoning_mode: str,
+            context: GroundedContext,
+            retrieved_chunk_count: int,
+            retrieval_seconds: float,
+            fallback_reason: str | None,
+            stream_thinking: bool,
+    ) -> tuple[StreamStartPayload, Iterator[StreamEvent]]:
+        """Build stream metadata and the corresponding event iterator."""
+        start_payload = StreamStartPayload(
+            query=query,
+            mode_used=mode_used,
+            reasoning_mode=reasoning_mode,
+            fallback_reason=fallback_reason,
+            sources=context.sources,
+            used_context_tokens=context.used_tokens,
+            retrieved_chunk_count=retrieved_chunk_count,
+            retrieval_seconds=retrieval_seconds,
+        )
+        event_stream = self._stream_text(
+            query=query,
+            mode=mode_used,
+            context_text=context.text or None,
+            reasoning_mode=reasoning_mode,
+            stream_thinking=stream_thinking,
+        )
+        return start_payload, event_stream
 
     def _should_use_grounded(
             self,
@@ -423,9 +487,9 @@ class GroundedAnswerService:
         return GroundedContext(text="", sources=[], used_tokens=0)
 
     @staticmethod
-    def _empty_text_stream() -> Iterator[str]:
-        """Return a one-message stream for empty retrieval results."""
-        yield "No relevant chunks were retrieved."
+    def _empty_stream_events() -> Iterator[StreamEvent]:
+        """Return a one-message event stream for empty retrieval results."""
+        yield StreamEvent(kind="answer_token", text="No relevant chunks were retrieved.")
 
     @staticmethod
     def _validate_mode(mode: str) -> None:

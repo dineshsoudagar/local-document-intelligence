@@ -5,12 +5,29 @@ from __future__ import annotations
 from pathlib import Path
 
 import re
-from typing import Any, Iterator, Sequence
+from dataclasses import dataclass
+from typing import Any, Iterator, Literal, Sequence
 
 import torch
 from threading import Thread
 from sentence_transformers import SentenceTransformer
 from transformers import AutoModelForCausalLM, AutoTokenizer, TextIteratorStreamer
+
+@dataclass(slots=True)
+class GeneratedText:
+    """Structured generation result."""
+
+    answer: str
+    thinking_content: str | None = None
+    thinking_finished: bool = False
+
+
+@dataclass(slots=True)
+class StreamEvent:
+    """Typed generation event for streaming."""
+
+    kind: Literal["thinking_token", "thinking_done", "answer_token"]
+    text: str = ""
 
 
 class QwenDenseEmbedder:
@@ -257,6 +274,20 @@ class LocalQwenGenerator:
             return text
         return self._tokenizer.decode(token_ids[:max_tokens], skip_special_tokens=True).strip()
 
+    def _apply_chat_template(
+        self,
+        messages: list[dict[str, str]],
+        *,
+        enable_thinking: bool,
+    ) -> str:
+        """Build a Qwen chat prompt with explicit thinking control."""
+        return self._tokenizer.apply_chat_template(
+            messages,
+            tokenize=False,
+            add_generation_prompt=True,
+            enable_thinking=enable_thinking,
+        )
+
     def build_prompt(
             self,
             *,
@@ -264,6 +295,7 @@ class LocalQwenGenerator:
             system_prompt: str,
             answer_instruction: str,
             context: str | None = None,
+            enable_thinking: bool = False
     ) -> str:
         """Build a chat prompt for grounded or direct answering."""
         if context:
@@ -294,6 +326,7 @@ class LocalQwenGenerator:
                 messages,
                 tokenize=False,
                 add_generation_prompt=True,
+                enable_thinking=enable_thinking,
             )
 
         return (
@@ -305,14 +338,16 @@ class LocalQwenGenerator:
         )
 
     def generate_from_prompt(
-            self,
-            prompt: str,
-            *,
-            max_new_tokens: int,
-            temperature: float,
-            top_p: float,
-            repetition_penalty: float,
-    ) -> str:
+        self,
+        prompt: str,
+        *,
+        max_new_tokens: int,
+        temperature: float,
+        top_p: float,
+        repetition_penalty: float,
+        enable_thinking: bool = False,
+        return_thinking: bool = False,
+    ) -> GeneratedText:
         """Generate a completion for a prepared prompt."""
         inputs = self._tokenizer(prompt, return_tensors="pt")
         inputs = {key: value.to(self._model.device) for key, value in inputs.items()}
@@ -334,18 +369,39 @@ class LocalQwenGenerator:
 
         prompt_length = inputs["input_ids"].shape[1]
         generated_ids = output_ids[0][prompt_length:]
-        answer = self._tokenizer.decode(generated_ids, skip_special_tokens=True).strip()
-        return self._strip_reasoning(answer)
+        text = self._tokenizer.decode(generated_ids, skip_special_tokens=True).strip()
+
+        if enable_thinking:
+            thinking_content, answer, thinking_finished = self._split_reasoning_text(text)
+            if return_thinking:
+                return GeneratedText(
+                    answer=answer,
+                    thinking_content=thinking_content,
+                    thinking_finished=thinking_finished,
+                )
+            return GeneratedText(
+                answer=answer,
+                thinking_content=None,
+                thinking_finished=thinking_finished,
+            )
+
+        return GeneratedText(
+            answer=self._strip_reasoning(text),
+            thinking_content=None,
+            thinking_finished=False,
+        )
 
     def stream_from_prompt(
-            self,
-            prompt: str,
-            *,
-            max_new_tokens: int,
-            temperature: float,
-            top_p: float,
-            repetition_penalty: float,
-    ) -> Iterator[str]:
+        self,
+        prompt: str,
+        *,
+        max_new_tokens: int,
+        temperature: float,
+        top_p: float,
+        repetition_penalty: float,
+        enable_thinking: bool = False,
+        stream_thinking: bool = False,
+    ) -> Iterator[StreamEvent]:
         """Yield generated text chunks for a prepared prompt."""
         inputs = self._tokenizer(prompt, return_tensors="pt")
         inputs = {key: value.to(self._model.device) for key, value in inputs.items()}
@@ -378,30 +434,77 @@ class LocalQwenGenerator:
         worker = Thread(target=_run_generation)
         worker.start()
 
+        buffer = ""
+        thinking_done = not enable_thinking
+
         for chunk in streamer:
-            if chunk:
-                yield chunk
+            if not chunk:
+                continue
+
+            if thinking_done:
+                cleaned = chunk.replace("<think>", "").replace("</think>", "")
+                if cleaned:
+                    yield StreamEvent(kind="answer_token", text=cleaned)
+                continue
+
+            buffer += chunk
+            buffer = buffer.replace("<think>", "")
+
+            end_index = buffer.find("</think>")
+            if end_index >= 0:
+                thinking_part = buffer[:end_index]
+                answer_part = buffer[end_index + len("</think>"):]
+
+                if stream_thinking and thinking_part:
+                    yield StreamEvent(kind="thinking_token", text=thinking_part)
+
+                yield StreamEvent(kind="thinking_done")
+                thinking_done = True
+
+                if answer_part:
+                    yield StreamEvent(kind="answer_token", text=answer_part)
+
+                buffer = ""
+                continue
+
+            safe_length = max(0, len(buffer) - len("</think>"))
+            if safe_length > 0:
+                safe_text = buffer[:safe_length]
+                buffer = buffer[safe_length:]
+                if stream_thinking and safe_text:
+                    yield StreamEvent(kind="thinking_token", text=safe_text)
+
+        if buffer:
+            if thinking_done:
+                cleaned = buffer.replace("<think>", "").replace("</think>", "")
+                if cleaned:
+                    yield StreamEvent(kind="answer_token", text=cleaned)
+            elif stream_thinking:
+                yield StreamEvent(kind="thinking_token", text=buffer.replace("<think>", ""))
 
         worker.join()
 
     def generate_answer(
-            self,
-            *,
-            query: str,
-            system_prompt: str,
-            answer_instruction: str,
-            max_new_tokens: int,
-            temperature: float,
-            top_p: float,
-            repetition_penalty: float,
-            context: str | None = None,
-    ) -> str:
+        self,
+        *,
+        query: str,
+        system_prompt: str,
+        answer_instruction: str,
+        max_new_tokens: int,
+        temperature: float,
+        top_p: float,
+        repetition_penalty: float,
+        context: str | None = None,
+        enable_thinking: bool = False,
+        return_thinking: bool = False,
+    ) -> GeneratedText:
         """Generate an answer with or without retrieved context."""
         prompt = self.build_prompt(
             query=query,
             context=context,
             system_prompt=system_prompt,
             answer_instruction=answer_instruction,
+            enable_thinking=enable_thinking,
         )
         return self.generate_from_prompt(
             prompt,
@@ -409,6 +512,8 @@ class LocalQwenGenerator:
             temperature=temperature,
             top_p=top_p,
             repetition_penalty=repetition_penalty,
+            enable_thinking=enable_thinking,
+            return_thinking=return_thinking,
         )
 
     def build_chat_prompt(
@@ -417,6 +522,7 @@ class LocalQwenGenerator:
             query: str,
             system_prompt: str,
             chat_instruction: str,
+            enable_thinking: bool = False
     ) -> str:
         """Build a normal chat prompt without retrieved context."""
         messages = [
@@ -438,6 +544,7 @@ class LocalQwenGenerator:
                 messages,
                 tokenize=False,
                 add_generation_prompt=True,
+                enable_thinking=enable_thinking,
             )
 
         return (
@@ -450,21 +557,24 @@ class LocalQwenGenerator:
         )
 
     def generate_chat_answer(
-            self,
-            *,
-            query: str,
-            system_prompt: str,
-            chat_instruction: str,
-            max_new_tokens: int,
-            temperature: float,
-            top_p: float,
-            repetition_penalty: float,
-    ) -> str:
+        self,
+        *,
+        query: str,
+        system_prompt: str,
+        chat_instruction: str,
+        max_new_tokens: int,
+        temperature: float,
+        top_p: float,
+        repetition_penalty: float,
+        enable_thinking: bool = False,
+        return_thinking: bool = False,
+    ) -> GeneratedText:
         """Generate a direct answer without retrieval context."""
         prompt = self.build_chat_prompt(
             query=query,
             system_prompt=system_prompt,
             chat_instruction=chat_instruction,
+            enable_thinking=enable_thinking,
         )
         return self.generate_from_prompt(
             prompt,
@@ -472,13 +582,9 @@ class LocalQwenGenerator:
             temperature=temperature,
             top_p=top_p,
             repetition_penalty=repetition_penalty,
+            enable_thinking=enable_thinking,
+            return_thinking=return_thinking,
         )
-
-    @staticmethod
-    def _strip_reasoning(text: str) -> str:
-        """Remove visible reasoning tags if the model emits them."""
-        cleaned = re.sub(r"<think>.*?</think>", "", text, flags=re.DOTALL | re.IGNORECASE)
-        return cleaned.strip()
 
     def generate_structured_json(
         self,
@@ -489,27 +595,31 @@ class LocalQwenGenerator:
         temperature: float = 0.0,
         top_p: float = 1.0,
         repetition_penalty: float = 1.0,
+        enable_thinking: bool = False,
     ) -> dict[str, Any]:
         """Generate a JSON object from the model and parse the first valid object found."""
-
         prompt = self.build_messages_prompt(
             system_prompt=system_prompt,
             user_prompt=user_prompt,
+            enable_thinking=enable_thinking,
         )
-        text = self.generate_from_prompt(
+        generated = self.generate_from_prompt(
             prompt,
             max_new_tokens=max_new_tokens,
             temperature=temperature,
             top_p=top_p,
             repetition_penalty=repetition_penalty,
+            enable_thinking=enable_thinking,
+            return_thinking=False,
         )
-        return self._extract_json(text)
+        return self._extract_json(generated.answer)
     
     def build_messages_prompt(
         self,
         *,
         system_prompt: str,
         user_prompt: str,
+        enable_thinking: bool = False
     ) -> str:
         """Build a generic chat-form prompt from explicit system and user content."""
 
@@ -529,6 +639,7 @@ class LocalQwenGenerator:
                 messages,
                 tokenize=False,
                 add_generation_prompt=True,
+                enable_thinking=enable_thinking,
             )
 
         return (
@@ -540,9 +651,36 @@ class LocalQwenGenerator:
         )
     
     @staticmethod
+    def _split_reasoning_text(text: str) -> tuple[str | None, str, bool]:
+        """Split Qwen output into thinking text and final answer."""
+        cleaned = text.strip()
+
+        if "</think>" in cleaned:
+            thinking_raw, answer = cleaned.rsplit("</think>", 1)
+            thinking = thinking_raw.replace("<think>", "").strip() or None
+            return thinking, answer.strip(), True
+
+        if "<think>" in cleaned:
+            thinking = cleaned.replace("<think>", "").strip() or None
+            return thinking, "", False
+
+        return None, cleaned, False
+    
+    @staticmethod
+    def _strip_reasoning(text: str) -> str:
+        """Remove visible reasoning tags if they are present."""
+        cleaned = re.sub(
+            r"<think>.*?</think>",
+            "",
+            text,
+            flags=re.DOTALL | re.IGNORECASE,
+        )
+        cleaned = cleaned.replace("<think>", "").replace("</think>", "")
+        return cleaned.strip()
+
+    @staticmethod
     def _extract_json(text: str) -> dict[str, Any]:
         """Extract and parse the first top-level JSON object from model output."""
-
         start = text.find("{")
         if start < 0:
             raise ValueError("Model output does not contain a JSON object")
@@ -582,7 +720,6 @@ class LocalQwenGenerator:
         candidate = text[start:end]
         try:
             import json
-
             payload = json.loads(candidate)
         except Exception as exc:
             raise ValueError("Failed to parse JSON from model output") from exc

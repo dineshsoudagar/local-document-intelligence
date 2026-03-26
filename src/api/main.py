@@ -15,11 +15,15 @@ from src.api.routes_query import router as query_router
 from src.app.document_registry import DocumentRegistry
 from src.app.paths import AppPaths
 from src.config.api_config import ApiConfig
-from src.config.generator_config import GeneratorConfig
 from src.generation.answer_service import GroundedAnswerService
 from src.indexing.index_service import IndexService
 from src.retrieval.qwen_models import LocalQwenGenerator
+from docling.datamodel.base_models import InputFormat
 
+from src.config.generator_config import GeneratorConfig
+from src.config.index_config import IndexConfig
+from src.config.model_catalog import ModelCatalog, default_pipeline_models
+from src.config.parser_config import ParserConfig
 
 PROJECT_ROOT = Path(__file__).resolve().parents[2]
 FRONTEND_DIST_DIR = PROJECT_ROOT / "frontend" / "dist"
@@ -52,10 +56,32 @@ async def lifespan(app: FastAPI):
     paths = AppPaths(base_dir=Path("storage"))
     paths.ensure_exists()
 
+    model_catalog = ModelCatalog()
+    pipeline_models = default_pipeline_models()
+
     registry = DocumentRegistry(paths.documents_db_path)
     registry.initialize()
-    index_service = IndexService()
-    generator_config = GeneratorConfig()
+
+    index_config = IndexConfig(
+        model_catalog=model_catalog,
+        pipeline_models=pipeline_models,
+    )
+    parser_config = ParserConfig(
+        model_catalog=model_catalog,
+        pipeline_models=pipeline_models,
+        allowed_formats=[InputFormat.PDF],
+        enable_picture_description=False,
+        include_picture_chunks=True,
+    )
+    index_service = IndexService(
+        index_config=index_config,
+        parser_config=parser_config,
+    )
+
+    generator_config = GeneratorConfig(
+        model_catalog=model_catalog,
+        pipeline_models=pipeline_models,
+    )
     generator = LocalQwenGenerator(generator_config.generator_model_path)
     answer_service = GroundedAnswerService(
         index=index_service.index,

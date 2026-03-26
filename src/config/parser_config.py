@@ -15,7 +15,7 @@ from docling.document_converter import DocumentConverter, PdfFormatOption
 from docling_core.transforms.chunker.tokenizer.huggingface import HuggingFaceTokenizer
 from transformers import AutoTokenizer
 
-from src.config.model_catalog import ModelCatalog
+from src.config.model_catalog import ModelCatalog, PipelineModels, default_pipeline_models
 
 
 def _default_project_root() -> Path:
@@ -29,10 +29,7 @@ class ParserConfig:
 
     project_root: Path = field(default_factory=_default_project_root)
     model_catalog: ModelCatalog = field(default_factory=ModelCatalog)
-
-    chunk_tokenizer_model_override: str | None = None
-    docling_artifacts_path_override: str | None = None
-    picture_description_model_override: str | None = None
+    pipeline_models: PipelineModels = field(default_factory=default_pipeline_models)
 
     max_chunk_tokens: int = 256
     min_chunk_tokens: int = 60
@@ -58,23 +55,32 @@ class ParserConfig:
     @property
     def chunk_tokenizer_model(self) -> str:
         """Return the local tokenizer directory used for chunk token counting."""
-        if self.chunk_tokenizer_model_override:
-            return str(Path(self.chunk_tokenizer_model_override).resolve())
-        return str(self.model_catalog.chunk_tokenizer_path(self.project_root))
+        return str(
+            self.model_catalog.resolve_hf_path(
+                self.pipeline_models.effective_chunk_tokenizer_key(),
+                self.project_root,
+            )
+        )
 
     @property
     def docling_artifacts_path(self) -> str:
         """Return the local Docling artifact directory."""
-        if self.docling_artifacts_path_override:
-            return str(Path(self.docling_artifacts_path_override).resolve())
-        return str(self.model_catalog.docling_artifacts_path(self.project_root))
+        return str(
+            self.model_catalog.resolve_artifact_path(
+                self.pipeline_models.docling_artifacts_key,
+                self.project_root,
+            )
+        )
 
     @property
     def picture_description_model(self) -> str:
         """Return the local picture description model directory."""
-        if self.picture_description_model_override:
-            return str(Path(self.picture_description_model_override).resolve())
-        return str(self.model_catalog.picture_description_path(self.project_root))
+        return str(
+            self.model_catalog.resolve_hf_path(
+                self.pipeline_models.picture_description_key,
+                self.project_root,
+            )
+        )
 
     def validate(self) -> None:
         """Validate numeric settings and verify that local offline assets exist."""
