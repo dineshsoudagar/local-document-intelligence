@@ -7,6 +7,7 @@ import shutil
 import tempfile
 from datetime import datetime, timezone
 from pathlib import Path
+from typing import TYPE_CHECKING
 
 from fastapi import APIRouter, Depends, File, HTTPException, UploadFile, status
 
@@ -25,7 +26,9 @@ from src.api.document_models import (
 )
 from src.app.document_registry import DocumentRegistry
 from src.app.paths import AppPaths
-from src.indexing.index_service import IndexService
+
+if TYPE_CHECKING:
+    from src.indexing.index_service import IndexService
 
 
 router = APIRouter()
@@ -73,7 +76,7 @@ def ingest_document(
     request: DocumentIngestRequest,
     registry: DocumentRegistry = Depends(get_document_registry_from_state),
     paths: AppPaths = Depends(get_app_paths_from_state),
-    index_service: IndexService = Depends(get_index_service_from_state),
+    index_service: "IndexService" = Depends(get_index_service_from_state),
 ) -> DocumentIngestResponse:
     """Copy a local PDF into managed storage and index it."""
     source_path = Path(request.source_path)
@@ -160,7 +163,7 @@ def ingest_document(
 def reindex_document(
     doc_id: str,
     registry: DocumentRegistry = Depends(get_document_registry_from_state),
-    index_service: IndexService = Depends(get_index_service_from_state),
+    index_service: "IndexService" = Depends(get_index_service_from_state),
 ) -> DocumentReindexResponse:
     """Reindex an already registered document."""
     existing = registry.get_document(doc_id)
@@ -235,7 +238,7 @@ def upload_document(
     file: UploadFile = File(...),
     registry: DocumentRegistry = Depends(get_document_registry_from_state),
     paths: AppPaths = Depends(get_app_paths_from_state),
-    index_service: IndexService = Depends(get_index_service_from_state),
+    index_service: "IndexService" = Depends(get_index_service_from_state),
 ) -> DocumentIngestResponse:
     """Upload a PDF, copy it into managed storage, and index it."""
     if not file.filename:

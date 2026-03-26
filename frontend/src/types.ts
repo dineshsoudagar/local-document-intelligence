@@ -86,3 +86,70 @@ export type QueryStreamEvent =
 
 // Small UI state machine used to drive loading indicators and status text.
 export type QueryStatus = "idle" | "retrieving" | "generating" | "error";
+
+export type SetupOption = {
+  key: string;
+  role?: string | null;
+  label: string;
+  description?: string | null;
+  size_hint?: string | null;
+  repo_id?: string | null;
+};
+
+export type GeneratorLoadPreset = {
+  key: string;
+  label: string;
+  description: string;
+  memory_hint: string;
+  generator_load_mode: "standard" | "bnb_8bit" | "bnb_4bit";
+  generator_dtype: "auto" | "float16" | "bfloat16" | "float32";
+  generator_device_map?: string | null;
+  bnb_4bit_quant_type?: "nf4" | "fp4";
+  bnb_4bit_use_double_quant?: boolean;
+  bnb_int8_enable_fp32_cpu_offload?: boolean;
+};
+
+export type TorchVariant = {
+  key: string;
+  label: string;
+  description: string;
+  index_url: string;
+};
+
+export type SetupComputeInfo = {
+  cuda_available: boolean;
+  gpu_name?: string | null;
+  recommended_torch_variant: string;
+  allowed_torch_variants: string[];
+};
+
+export type SetupOptions = {
+  generator_models: SetupOption[];
+  embedding_models: SetupOption[];
+  generator_load_presets: GeneratorLoadPreset[];
+  compute: SetupComputeInfo;
+  torch_variants: TorchVariant[];
+};
+
+export type SetupStatus = {
+  install_state: "not_ready" | "installing" | "ready" | "failed";
+  current_step?: string | null;
+  progress_message?: string | null;
+  last_error?: string | null;
+  cancel_requested: boolean;
+  is_busy: boolean;
+  selected_generator_key?: string | null;
+  selected_embedding_key?: string | null;
+  selected_generator_load_preset?: string | null;
+  selected_torch_variant?: string | null;
+  started_at?: string | null;
+  completed_at?: string | null;
+  updated_at: string;
+};
+
+export type SetupStartPayload = {
+  generator_key: string;
+  embedding_key: string;
+  generator_load_preset: string;
+  torch_variant: string;
+};

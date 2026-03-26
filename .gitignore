@@ -6,6 +6,9 @@ data/
 /models/
 /commented_scripts/
 /storage/
+/build/
+/bundle/python/
+/bundle/wheels/
 __pycache__/
 .idea
 logs/

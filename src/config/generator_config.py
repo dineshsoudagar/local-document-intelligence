@@ -54,27 +54,27 @@ class GeneratorLoadPreset:
 
 
 GENERATOR_LOAD_PRESETS: dict[str, GeneratorLoadPreset] = {
-    "default": GeneratorLoadPreset(
-        key="default",
-        label="Default",
+    "standard": GeneratorLoadPreset(
+        key="standard",
+        label="Standard",
         description="Standard loading without bitsandbytes quantization.",
         memory_hint="Highest memory usage. Best baseline compatibility.",
         generator_load_mode="standard",
         generator_dtype="bfloat16",
         generator_device_map="auto",
     ),
-    "balanced_8bit": GeneratorLoadPreset(
-        key="balanced_8bit",
-        label="Balanced 8-bit",
+    "bnb_8bit": GeneratorLoadPreset(
+        key="bnb_8bit",
+        label="8-bit (bnb)",
         description="Reduced memory usage with 8-bit loading and better quality retention than 4-bit.",
         memory_hint="Good choice for mid-range GPUs.",
         generator_load_mode="bnb_8bit",
         generator_dtype="bfloat16",
         generator_device_map="auto",
     ),
-    "low_memory_4bit": GeneratorLoadPreset(
-        key="low_memory_4bit",
-        label="Low memory 4-bit",
+    "bnb_4bit": GeneratorLoadPreset(
+        key="bnb_4bit",
+        label="4-bit (bnb)",
         description="Aggressive VRAM reduction using 4-bit NF4 quantization.",
         memory_hint="Best fit for constrained GPUs. Quality may drop slightly.",
         generator_load_mode="bnb_4bit",
@@ -240,14 +240,6 @@ class GeneratorConfig:
             )
         if self.max_chunk_tokens > self.max_context_tokens:
             raise ValueError("max_chunk_tokens must be smaller than or equal to max_context_tokens")
-        if self.generator_load_mode not in {"standard", "bnb_8bit", "bnb_4bit"}:
-                    raise ValueError(
-                        "generator_load_mode must be one of: standard, bnb_8bit, bnb_4bit"
-                    )
-        if self.generator_dtype not in {"auto", "float16", "bfloat16", "float32"}:
-                    raise ValueError(
-                        "generator_dtype must be one of: auto, float16, bfloat16, float32"
-                    )
         if self.generator_load_mode not in {"standard", "bnb_8bit", "bnb_4bit"}:
             raise ValueError(
                 "generator_load_mode must be one of: standard, bnb_8bit, bnb_4bit"

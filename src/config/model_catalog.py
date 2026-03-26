@@ -2,6 +2,10 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 from pathlib import Path
+from typing import Literal
+
+
+SelectableModelRole = Literal["generator", "embedder", "reranker", "picture_description"]
 
 
 @dataclass(frozen=True, slots=True)
@@ -12,10 +16,26 @@ class ModelEntry:
     repo_id: str
     relative_dir: str
     revision: str = "main"
+    role: SelectableModelRole | None = None
+    selectable: bool = False
+    label: str | None = None
+    description: str | None = None
+    size_hint: str | None = None
 
     def resolve_dir(self, project_root: str | Path, models_root: str) -> Path:
         """Return the resolved local directory for this model."""
         return Path(project_root).resolve() / models_root / self.relative_dir
+
+    def to_setup_option(self) -> dict[str, str | None]:
+        """Return JSON-friendly setup metadata for one selectable model."""
+        return {
+            "key": self.key,
+            "role": self.role,
+            "label": self.label or self.key,
+            "description": self.description,
+            "size_hint": self.size_hint,
+            "repo_id": self.repo_id,
+        }
 
 
 @dataclass(frozen=True, slots=True)
@@ -75,26 +95,49 @@ class ModelCatalog:
                 key="qwen3_embedding_0_6b",
                 repo_id="Qwen/Qwen3-Embedding-0.6B",
                 relative_dir="embedders/qwen3-embedding-0.6b",
+                role="embedder",
+                selectable=True,
+                label="Qwen3 Embedding 0.6B",
+                description="Default dense embedding model for local retrieval.",
+                size_hint="0.6B",
             ),
             ModelEntry(
                 key="qwen3_reranker_0_6b",
                 repo_id="Qwen/Qwen3-Reranker-0.6B",
                 relative_dir="rerankers/qwen3-reranker-0.6b",
+                role="reranker",
+                label="Qwen3 Reranker 0.6B",
+                description="Default reranker used internally by the retrieval pipeline.",
+                size_hint="0.6B",
             ),
             ModelEntry(
                 key="qwen3_4b_instruct_2507",
                 repo_id="Qwen/Qwen3-4B-Instruct-2507",
                 relative_dir="generators/qwen3-4b-instruct-2507",
+                role="generator",
+                selectable=True,
+                label="Qwen3 4B Instruct 2507",
+                description="Instruction-tuned generator optimized for grounded answers.",
+                size_hint="4B",
             ),
             ModelEntry(
                 key="smolvlm_256m_instruct",
                 repo_id="HuggingFaceTB/SmolVLM-256M-Instruct",
                 relative_dir="vlm/smolvlm-256m-instruct",
+                role="picture_description",
+                label="SmolVLM 256M Instruct",
+                description="Picture description model used internally by Docling when enabled.",
+                size_hint="256M",
             ),
             ModelEntry(
                 key="qwen3_4b",
                 repo_id="Qwen/Qwen3-4B",
                 relative_dir="generators/qwen3-4b",
+                role="generator",
+                selectable=True,
+                label="Qwen3 4B Base",
+                description="Base Qwen3 4B generator for local experimentation.",
+                size_hint="4B",
             ),
         )
     )
@@ -123,6 +166,22 @@ class ModelCatalog:
     def downloadable_keys(self) -> tuple[str, ...]:
         """Return all keys supported by the downloader."""
         return tuple(entry.key for entry in self.all())
+
+    def selectable_models(self, role: SelectableModelRole) -> tuple[ModelEntry, ...]:
+        """Return setup-selectable models for one pipeline role."""
+        return tuple(
+            entry
+            for entry in self.hf_models()
+            if entry.role == role and entry.selectable
+        )
+
+    def generator_choices(self) -> list[dict[str, str | None]]:
+        """Return setup metadata for selectable generator models."""
+        return [entry.to_setup_option() for entry in self.selectable_models("generator")]
+
+    def embedding_choices(self) -> list[dict[str, str | None]]:
+        """Return setup metadata for selectable embedding models."""
+        return [entry.to_setup_option() for entry in self.selectable_models("embedder")]
 
     def get(self, key: str) -> ModelEntry | ArtifactEntry:
         """Return a configured model or artifact entry by key."""

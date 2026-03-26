@@ -1003,3 +1003,278 @@ body[data-theme="dark"] .document-menu-item.delete {
 body[data-theme="dark"] .document-menu-item.delete:hover:not(:disabled) {
   background: rgba(127, 29, 29, 0.4);
 }
+
+.setup-loading {
+  min-height: 100vh;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 32px;
+  font-size: 16px;
+  color: #475569;
+}
+
+.setup-shell {
+  min-height: 100vh;
+  display: flex;
+  flex-direction: column;
+  gap: 24px;
+  padding: 32px;
+}
+
+.setup-hero,
+.setup-panel,
+.setup-summary-panel {
+  border: 1px solid #dbe3ee;
+  border-radius: 24px;
+  background: rgba(255, 255, 255, 0.9);
+  box-shadow: 0 12px 28px rgba(15, 23, 42, 0.08);
+  backdrop-filter: blur(12px);
+}
+
+.setup-hero {
+  padding: 28px;
+}
+
+.setup-kicker {
+  margin: 0 0 12px;
+  font-size: 12px;
+  font-weight: 800;
+  letter-spacing: 0.18em;
+  text-transform: uppercase;
+  color: #2563eb;
+}
+
+.setup-hero h1 {
+  margin: 0;
+  max-width: 780px;
+  font-size: clamp(2rem, 4vw, 3.2rem);
+  line-height: 1.05;
+}
+
+.setup-copy {
+  max-width: 760px;
+  margin: 16px 0 0;
+  color: #475569;
+  line-height: 1.6;
+}
+
+.setup-copy code {
+  margin-left: 0.3rem;
+  padding: 0.16rem 0.42rem;
+  border-radius: 0.5rem;
+  background: rgba(37, 99, 235, 0.08);
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono",
+    "Courier New", monospace;
+}
+
+.setup-status-banner {
+  margin-top: 20px;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 10px 14px;
+  padding: 14px 16px;
+  border-radius: 18px;
+  background: linear-gradient(135deg, rgba(37, 99, 235, 0.08) 0%, rgba(15, 23, 42, 0.04) 100%);
+}
+
+.setup-status-label {
+  padding: 7px 12px;
+  border-radius: 999px;
+  background: linear-gradient(135deg, #2563eb 0%, #1d4ed8 100%);
+  color: #eff6ff;
+  font-size: 12px;
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+}
+
+.setup-status-message {
+  color: #334155;
+  font-weight: 600;
+}
+
+.setup-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 20px;
+}
+
+.setup-panel {
+  padding: 20px;
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+
+.setup-panel-header h2 {
+  margin-bottom: 8px;
+}
+
+.setup-panel-header p {
+  margin: 0;
+  color: #64748b;
+  line-height: 1.55;
+}
+
+.setup-option-grid {
+  display: grid;
+  gap: 12px;
+}
+
+.setup-card-option {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 16px 18px;
+  border: 1px solid #dbe3ee;
+  border-radius: 18px;
+  background: linear-gradient(180deg, #ffffff 0%, #f8fbff 100%);
+  color: #1f2937;
+  text-align: left;
+  cursor: pointer;
+  transition: transform 0.16s ease, border-color 0.2s ease, box-shadow 0.2s ease,
+    background 0.2s ease;
+}
+
+.setup-card-option:hover {
+  transform: translateY(-1px);
+  border-color: #93c5fd;
+  box-shadow: 0 8px 18px rgba(59, 130, 246, 0.1);
+}
+
+.setup-card-option.selected {
+  border-color: #2563eb;
+  background: linear-gradient(180deg, rgba(219, 234, 254, 0.9) 0%, rgba(239, 246, 255, 0.98) 100%);
+  box-shadow: 0 12px 24px rgba(37, 99, 235, 0.12);
+}
+
+.setup-card-option-title {
+  font-size: 15px;
+  font-weight: 700;
+}
+
+.setup-card-option-body {
+  color: #64748b;
+  line-height: 1.5;
+}
+
+.setup-summary-panel {
+  padding: 20px 24px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+}
+
+.setup-summary-copy h2 {
+  margin-bottom: 8px;
+}
+
+.setup-summary-copy p {
+  margin: 0;
+  color: #475569;
+  line-height: 1.5;
+}
+
+.setup-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 12px;
+}
+
+.setup-action-button {
+  padding: 14px 18px;
+  border: none;
+  border-radius: 16px;
+  color: #ffffff;
+  font: inherit;
+  font-weight: 700;
+  cursor: pointer;
+  transition: transform 0.16s ease, opacity 0.2s ease, box-shadow 0.2s ease;
+}
+
+.setup-action-button:hover:not(:disabled) {
+  transform: translateY(-1px);
+}
+
+.setup-action-button:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
+  transform: none;
+}
+
+.setup-action-button.primary {
+  background: linear-gradient(135deg, #2563eb 0%, #1d4ed8 100%);
+  box-shadow: 0 10px 22px rgba(37, 99, 235, 0.18);
+}
+
+.setup-action-button.secondary {
+  background: linear-gradient(135deg, #475569 0%, #334155 100%);
+  box-shadow: 0 10px 22px rgba(51, 65, 85, 0.18);
+}
+
+.setup-action-button.danger {
+  background: linear-gradient(135deg, #ef4444 0%, #f97316 100%);
+  box-shadow: 0 10px 22px rgba(239, 68, 68, 0.18);
+}
+
+@media (max-width: 960px) {
+  .setup-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .setup-summary-panel {
+    flex-direction: column;
+    align-items: stretch;
+  }
+}
+
+body[data-theme="dark"] .setup-loading {
+  color: #cbd5e1;
+}
+
+body[data-theme="dark"] .setup-hero,
+body[data-theme="dark"] .setup-panel,
+body[data-theme="dark"] .setup-summary-panel {
+  border-color: #243247;
+  background: linear-gradient(180deg, rgba(15, 23, 42, 0.92) 0%, rgba(17, 24, 39, 0.98) 100%);
+  box-shadow: 0 12px 28px rgba(2, 6, 23, 0.38);
+}
+
+body[data-theme="dark"] .setup-kicker {
+  color: #93c5fd;
+}
+
+body[data-theme="dark"] .setup-copy,
+body[data-theme="dark"] .setup-panel-header p,
+body[data-theme="dark"] .setup-card-option-body,
+body[data-theme="dark"] .setup-summary-copy p,
+body[data-theme="dark"] .setup-status-message {
+  color: #a8b6ca;
+}
+
+body[data-theme="dark"] .setup-copy code {
+  background: rgba(96, 165, 250, 0.12);
+}
+
+body[data-theme="dark"] .setup-status-banner {
+  background: linear-gradient(135deg, rgba(37, 99, 235, 0.16) 0%, rgba(30, 41, 59, 0.2) 100%);
+}
+
+body[data-theme="dark"] .setup-card-option {
+  border-color: #243247;
+  background: linear-gradient(180deg, rgba(17, 24, 39, 0.96) 0%, rgba(15, 23, 42, 0.96) 100%);
+  color: #e5eefb;
+}
+
+body[data-theme="dark"] .setup-card-option:hover {
+  border-color: #60a5fa;
+  box-shadow: 0 8px 18px rgba(37, 99, 235, 0.18);
+}
+
+body[data-theme="dark"] .setup-card-option.selected {
+  border-color: #60a5fa;
+  background: linear-gradient(180deg, rgba(30, 64, 175, 0.34) 0%, rgba(15, 23, 42, 0.96) 100%);
+}

@@ -6,7 +6,7 @@ import json
 import time
 from collections.abc import Iterator
 from pathlib import Path
-from typing import cast
+from typing import TYPE_CHECKING, cast
 
 from fastapi import APIRouter, Depends, HTTPException, status
 from fastapi.responses import StreamingResponse
@@ -17,7 +17,9 @@ from src.api.app_state import (
 )
 from src.api.query_models import QueryRequest, QueryResponse
 from src.app.document_registry import DocumentRegistry
-from src.generation.answer_service import GroundedAnswerService
+
+if TYPE_CHECKING:
+    from src.generation.answer_service import GroundedAnswerService
 
 
 router = APIRouter()
@@ -145,7 +147,7 @@ def _resolve_source_doc_id(source: dict[str, object]) -> str | None:
 @router.post("/query", response_model=QueryResponse)
 def query_documents(
     request: QueryRequest,
-    answer_service: GroundedAnswerService = Depends(get_answer_service_from_state),
+    answer_service: "GroundedAnswerService" = Depends(get_answer_service_from_state),
     registry: DocumentRegistry = Depends(get_document_registry_from_state),
 ) -> QueryResponse:
     """Run a non-streaming grounded query and return the final answer payload."""
@@ -175,7 +177,7 @@ def query_documents(
 @router.post("/query/stream")
 def stream_query_documents(
     request: QueryRequest,
-    answer_service: GroundedAnswerService = Depends(get_answer_service_from_state),
+    answer_service: "GroundedAnswerService" = Depends(get_answer_service_from_state),
     registry: DocumentRegistry = Depends(get_document_registry_from_state),
 ) -> StreamingResponse:
     """Stream query output as NDJSON events."""

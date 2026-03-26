@@ -6,6 +6,9 @@ import type {
   QueryStreamDone,
   QueryStreamEvent,
   QueryStreamStart,
+  SetupOptions,
+  SetupStartPayload,
+  SetupStatus,
 } from "./types";
 
 const API_BASE_URL = (import.meta.env.VITE_API_BASE_URL ?? "").replace(/\/$/, "");
@@ -14,11 +17,24 @@ function apiUrl(path: string) {
   return API_BASE_URL ? `${API_BASE_URL}${path}` : path;
 }
 
+async function readErrorMessage(response: Response, fallback: string) {
+  try {
+    const payload = await response.json();
+    if (payload && typeof payload.detail === "string") {
+      return payload.detail;
+    }
+  } catch {
+    // Fall back to a generic message when the backend did not return JSON.
+  }
+
+  return `${fallback}: ${response.status}`;
+}
+
 export async function fetchDocuments() {
   const response = await fetch(apiUrl("/documents"));
 
   if (!response.ok) {
-    throw new Error(`Request failed: ${response.status}`);
+    throw new Error(await readErrorMessage(response, "Request failed"));
   }
 
   const data: DocumentsResponse = await response.json();
@@ -35,7 +51,7 @@ export async function uploadDocument(file: File) {
   });
 
   if (!response.ok) {
-    throw new Error(`Upload failed: ${response.status}`);
+    throw new Error(await readErrorMessage(response, "Upload failed"));
   }
 
   const data: DocumentUploadResponse = await response.json();
@@ -48,7 +64,7 @@ export async function deleteDocument(docId: string) {
   });
 
   if (!response.ok) {
-    throw new Error(`Delete failed: ${response.status}`);
+    throw new Error(await readErrorMessage(response, "Delete failed"));
   }
 
   const data: DocumentDeleteResponse = await response.json();
@@ -76,7 +92,7 @@ export async function streamQuery(
   });
 
   if (!response.ok) {
-    throw new Error(`Query failed: ${response.status}`);
+    throw new Error(await readErrorMessage(response, "Query failed"));
   }
 
   if (!response.body) {
@@ -140,4 +156,64 @@ export async function streamQuery(
   if (trailing) {
     processEvent(JSON.parse(trailing) as QueryStreamEvent);
   }
+}
+
+export async function fetchSetupStatus() {
+  const response = await fetch(apiUrl("/setup/status"));
+
+  if (!response.ok) {
+    throw new Error(await readErrorMessage(response, "Failed to load setup status"));
+  }
+
+  return (await response.json()) as SetupStatus;
+}
+
+export async function fetchSetupOptions() {
+  const response = await fetch(apiUrl("/setup/options"));
+
+  if (!response.ok) {
+    throw new Error(await readErrorMessage(response, "Failed to load setup options"));
+  }
+
+  return (await response.json()) as SetupOptions;
+}
+
+export async function startSetup(payload: SetupStartPayload) {
+  const response = await fetch(apiUrl("/setup/start"), {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+    },
+    body: JSON.stringify(payload),
+  });
+
+  if (!response.ok) {
+    throw new Error(await readErrorMessage(response, "Failed to start setup"));
+  }
+
+  return (await response.json()) as SetupStatus;
+}
+
+export async function retrySetup() {
+  const response = await fetch(apiUrl("/setup/retry"), {
+    method: "POST",
+  });
+
+  if (!response.ok) {
+    throw new Error(await readErrorMessage(response, "Failed to retry setup"));
+  }
+
+  return (await response.json()) as SetupStatus;
+}
+
+export async function cancelSetup() {
+  const response = await fetch(apiUrl("/setup/cancel"), {
+    method: "POST",
+  });
+
+  if (!response.ok) {
+    throw new Error(await readErrorMessage(response, "Failed to cancel setup"));
+  }
+
+  return (await response.json()) as SetupStatus;
 }

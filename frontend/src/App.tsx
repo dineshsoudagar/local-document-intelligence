@@ -1,19 +1,31 @@
 import { useEffect, useRef, useState } from "react";
 import "./App.css";
-import { deleteDocument, fetchDocuments, streamQuery, uploadDocument } from "./api";
+import {
+  cancelSetup,
+  deleteDocument,
+  fetchDocuments,
+  fetchSetupOptions,
+  fetchSetupStatus,
+  retrySetup,
+  startSetup,
+  streamQuery,
+  uploadDocument,
+} from "./api";
 import { DocumentsPane } from "./components/DocumentsPane";
 import { QueryPane } from "./components/QueryPane";
+import { SetupPane } from "./components/SetupPane";
 import type {
   ChatMessage,
   BackendQueryMode,
   DocumentItem,
   QueryRequestPayload,
   QueryStatus,
+  SetupOptions,
+  SetupStatus,
   UiQueryMode,
 } from "./types";
 
 export default function App() {
-  // App owns the shared frontend state and passes focused slices into each pane.
   const [theme, setTheme] = useState<"light" | "dark">(() => {
     const storedTheme = window.localStorage.getItem("theme");
     if (storedTheme === "light" || storedTheme === "dark") {
@@ -38,7 +50,13 @@ export default function App() {
   const [deletingDocId, setDeletingDocId] = useState<string | null>(null);
   const [openMenuDocId, setOpenMenuDocId] = useState<string | null>(null);
   const [queryStatus, setQueryStatus] = useState<QueryStatus>("idle");
+  const [setupOptions, setSetupOptions] = useState<SetupOptions | null>(null);
+  const [setupStatus, setSetupStatus] = useState<SetupStatus | null>(null);
+  const [setupError, setSetupError] = useState<string | null>(null);
+  const [isSetupLoading, setIsSetupLoading] = useState(true);
   const abortControllerRef = useRef<AbortController | null>(null);
+
+  const isRuntimeReady = setupStatus?.install_state === "ready";
 
   function updateMessage(
     messageId: string,
@@ -57,6 +75,16 @@ export default function App() {
 
   function wait(ms: number) {
     return new Promise((resolve) => window.setTimeout(resolve, ms));
+  }
+
+  async function refreshSetupState() {
+    const [statusPayload, optionsPayload] = await Promise.all([
+      fetchSetupStatus(),
+      fetchSetupOptions(),
+    ]);
+    setSetupStatus(statusPayload);
+    setSetupOptions(optionsPayload);
+    return statusPayload;
   }
 
   async function fetchAndStoreDocuments() {
@@ -82,7 +110,6 @@ export default function App() {
     throw lastError instanceof Error ? lastError : new Error("Failed to fetch documents");
   }
 
-  // Pull the latest uploaded documents from the backend so the left pane stays in sync.
   async function loadDocuments() {
     setIsFetchingDocuments(true);
     try {
@@ -127,17 +154,68 @@ export default function App() {
   }
 
   useEffect(() => {
-    // Load initial document data once when the app mounts.
-    loadDocuments();
+    let isMounted = true;
+
+    async function loadInitialState() {
+      setIsSetupLoading(true);
+      try {
+        setSetupError(null);
+        const statusPayload = await refreshSetupState();
+        if (!isMounted) {
+          return;
+        }
+
+        if (statusPayload.install_state === "ready") {
+          await loadDocuments();
+        }
+      } catch (err) {
+        if (!isMounted) {
+          return;
+        }
+
+        setSetupError(err instanceof Error ? err.message : "Failed to load setup state.");
+      } finally {
+        if (isMounted) {
+          setIsSetupLoading(false);
+        }
+      }
+    }
+
+    void loadInitialState();
 
     return () => {
-      // Cancel any in-flight query if the page is being torn down.
+      isMounted = false;
       abortControllerRef.current?.abort();
     };
   }, []);
 
   useEffect(() => {
-    // Close any open document action menu when the user clicks elsewhere.
+    if (!setupStatus?.is_busy) {
+      return;
+    }
+
+    const intervalId = window.setInterval(() => {
+      void refreshSetupState().catch((err) => {
+        setSetupError(err instanceof Error ? err.message : "Failed to refresh setup status.");
+      });
+    }, 2000);
+
+    return () => {
+      window.clearInterval(intervalId);
+    };
+  }, [setupStatus?.is_busy]);
+
+  useEffect(() => {
+    if (setupStatus?.install_state !== "ready") {
+      return;
+    }
+
+    if (documents.length === 0) {
+      void loadDocuments();
+    }
+  }, [setupStatus?.install_state]);
+
+  useEffect(() => {
     function handleWindowClick() {
       setOpenMenuDocId(null);
     }
@@ -156,7 +234,6 @@ export default function App() {
   }, [theme]);
 
   useEffect(() => {
-    // Drop selections that no longer exist after a document list refresh.
     setSelectedDocIds((current) => {
       if (current.length === 0) {
         return current;
@@ -169,7 +246,6 @@ export default function App() {
     });
   }, [documents]);
 
-  // Stop the active streaming query and reset the UI back to idle.
   function handleStop() {
     abortControllerRef.current?.abort();
     abortControllerRef.current = null;
@@ -177,8 +253,35 @@ export default function App() {
     setQueryStatus("idle");
   }
 
+  async function handleStartSetup(payload: {
+    generator_key: string;
+    embedding_key: string;
+    generator_load_preset: string;
+    torch_variant: string;
+  }) {
+    setSetupError(null);
+    const nextStatus = await startSetup(payload);
+    setSetupStatus(nextStatus);
+  }
+
+  async function handleRetrySetup() {
+    setSetupError(null);
+    const nextStatus = await retrySetup();
+    setSetupStatus(nextStatus);
+  }
+
+  async function handleCancelSetup() {
+    setSetupError(null);
+    const nextStatus = await cancelSetup();
+    setSetupStatus(nextStatus);
+  }
+
   async function handleSubmit() {
-    // Ignore empty submissions so the backend is only called with real input.
+    if (!isRuntimeReady) {
+      setQueryError("Complete setup before sending queries.");
+      return;
+    }
+
     const trimmedQuery = queryText.trim();
     const effectiveSelectedDocIds = selectedDocIds;
 
@@ -186,13 +289,11 @@ export default function App() {
       return;
     }
 
-    // Document-only mode requires an explicit document selection first.
     if (uiMode === "document" && effectiveSelectedDocIds.length === 0) {
       setQueryError("Select at least one document first.");
       return;
     }
 
-    // Replace any older request so only the newest query continues streaming.
     abortControllerRef.current?.abort();
     const controller = new AbortController();
     abortControllerRef.current = controller;
@@ -221,7 +322,6 @@ export default function App() {
     ]);
 
     try {
-      // Translate the UI-specific mode labels into the backend API contract.
       let backendMode: BackendQueryMode = "grounded";
 
       if (uiMode === "chat") {
@@ -232,13 +332,10 @@ export default function App() {
 
       let docIds: string[] | undefined;
 
-      // When one or more documents are selected, scope retrieval to those
-      // documents if the current mode allows document filtering.
       if ((uiMode === "document" || uiMode === "auto") && effectiveSelectedDocIds.length > 0) {
         docIds = effectiveSelectedDocIds;
       }
 
-      // Build the request payload and include doc_ids only when a document filter exists.
       const payload: QueryRequestPayload = {
         query: trimmedQuery,
         mode: backendMode,
@@ -247,7 +344,6 @@ export default function App() {
 
       await streamQuery(payload, controller.signal, {
         onStart: (data) => {
-          // The start event tells us which evidence was chosen before tokens arrive.
           updateMessage(assistantMessageId, (message) => ({
             ...message,
             sources: data.sources,
@@ -255,7 +351,6 @@ export default function App() {
           setQueryStatus("generating");
         },
         onToken: (text) => {
-          // Append streamed tokens so the answer appears progressively.
           updateMessage(assistantMessageId, (message) => ({
             ...message,
             content: message.content + text,
@@ -263,7 +358,6 @@ export default function App() {
           }));
         },
         onDone: (data) => {
-          // Replace the streamed draft with the backend's final answer snapshot.
           updateMessage(assistantMessageId, (message) => ({
             ...message,
             content: data.answer,
@@ -273,7 +367,6 @@ export default function App() {
         },
       });
     } catch (err) {
-      // User-triggered cancellation is an expected path, not an error state.
       if (err instanceof DOMException && err.name === "AbortError") {
         updateMessage(assistantMessageId, (message) => ({
           ...message,
@@ -284,7 +377,6 @@ export default function App() {
         return;
       }
 
-      // Surface backend or network failures inside the query pane.
       const message = err instanceof Error ? err.message : "Failed to run query";
 
       if (err instanceof Error) {
@@ -302,7 +394,6 @@ export default function App() {
       }));
       setQueryStatus("error");
     } finally {
-      // Release the controller so the next query starts from a clean state.
       if (abortControllerRef.current === controller) {
         abortControllerRef.current = null;
       }
@@ -310,8 +401,12 @@ export default function App() {
     }
   }
 
-  // Upload one PDF, then refresh the document list and select the new item.
   async function handleUploadFile(file: File) {
+    if (!isRuntimeReady) {
+      setUploadError("Complete setup before uploading documents.");
+      return;
+    }
+
     if (!file.name.toLowerCase().endsWith(".pdf")) {
       setUploadError("Only PDF files are supported right now.");
       return;
@@ -321,7 +416,6 @@ export default function App() {
     setIsUploading(true);
 
     try {
-      // Refresh after upload so any backend-generated metadata is reflected in the UI.
       const data = await uploadDocument(file);
       const foundDocument = await pollDocumentsUntilVisible(data.document.doc_id);
       if (!foundDocument) {
@@ -345,7 +439,6 @@ export default function App() {
     }
   }
 
-  // Delete a document from the backend and remove it from local state after confirmation.
   async function handleDeleteDocument(document: DocumentItem) {
     setOpenMenuDocId(null);
 
@@ -362,10 +455,7 @@ export default function App() {
 
     try {
       const data = await deleteDocument(document.doc_id);
-      // Update the list locally so the UI responds immediately after deletion.
       setDocuments((current) => current.filter((item) => item.doc_id !== data.doc_id));
-
-      // Clear the selection if the deleted document was the active one.
       setSelectedDocIds((current) => current.filter((docId) => docId !== data.doc_id));
     } catch (err) {
       if (err instanceof Error) {
@@ -378,9 +468,25 @@ export default function App() {
     }
   }
 
+  if (isSetupLoading) {
+    return <div className="setup-loading">Loading desktop runtime setup...</div>;
+  }
+
+  if (!isRuntimeReady) {
+    return (
+      <SetupPane
+        options={setupOptions}
+        status={setupStatus}
+        error={setupError}
+        onStart={handleStartSetup}
+        onRetry={handleRetrySetup}
+        onCancel={handleCancelSetup}
+      />
+    );
+  }
+
   return (
     <div className="app-shell">
-      {/* Left pane handles upload, selection, and document actions. */}
       <DocumentsPane
         documents={documents}
         isFetchingDocuments={isFetchingDocuments}
@@ -398,7 +504,6 @@ export default function App() {
         onToggleMenu={setOpenMenuDocId}
       />
 
-      {/* Center pane owns query input, answer display, and query status messaging. */}
       <QueryPane
         documents={documents}
         messages={messages}

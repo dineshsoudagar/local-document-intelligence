@@ -18,5 +18,4 @@ huggingface_hub
 hf_xet
 python-multipart
 fastembed
-bitsandbytes
 accelerate
