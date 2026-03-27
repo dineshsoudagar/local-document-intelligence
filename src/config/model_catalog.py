@@ -111,16 +111,6 @@ class ModelCatalog:
                 size_hint="0.6B",
             ),
             ModelEntry(
-                key="qwen3_4b_instruct_2507",
-                repo_id="Qwen/Qwen3-4B-Instruct-2507",
-                relative_dir="generators/qwen3-4b-instruct-2507",
-                role="generator",
-                selectable=True,
-                label="Qwen3 4B Instruct 2507",
-                description="Instruction-tuned generator optimized for grounded answers.",
-                size_hint="4B",
-            ),
-            ModelEntry(
                 key="smolvlm_256m_instruct",
                 repo_id="HuggingFaceTB/SmolVLM-256M-Instruct",
                 relative_dir="vlm/smolvlm-256m-instruct",
@@ -137,6 +127,16 @@ class ModelCatalog:
                 selectable=True,
                 label="Qwen3 4B Base",
                 description="Base Qwen3 4B generator for local experimentation.",
+                size_hint="4B",
+            ),
+            ModelEntry(
+                key="qwen3_4b_instruct_2507",
+                repo_id="Qwen/Qwen3-4B-Instruct-2507",
+                relative_dir="generators/qwen3-4b-instruct-2507",
+                role="generator",
+                selectable=True,
+                label="Qwen3 4B Instruct 2507",
+                description="Instruction-tuned generator optimized for grounded answers.",
                 size_hint="4B",
             ),
         )

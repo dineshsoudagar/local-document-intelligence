@@ -477,9 +477,14 @@ class SetupService:
         """Return lightweight compute recommendations without importing torch."""
         cuda_available = False
         gpu_name: str | None = None
+        gpu_memory_gb: int | None = None
         try:
             result = subprocess.run(
-                ["nvidia-smi", "--query-gpu=name", "--format=csv,noheader"],
+                [
+                    "nvidia-smi",
+                    "--query-gpu=name,memory.total",
+                    "--format=csv,noheader,nounits",
+                ],
                 capture_output=True,
                 text=True,
                 check=False,
@@ -489,16 +494,35 @@ class SetupService:
                 lines = [line.strip() for line in result.stdout.splitlines() if line.strip()]
                 if lines:
                     cuda_available = True
-                    gpu_name = lines[0]
+                    first_line = lines[0]
+                    parts = [part.strip() for part in first_line.split(",")]
+                    gpu_name = parts[0] if parts else None
+                    if len(parts) > 1:
+                        try:
+                            gpu_memory_mb = int(parts[1])
+                            gpu_memory_gb = max(1, round(gpu_memory_mb / 1024))
+                        except ValueError:
+                            gpu_memory_gb = None
         except Exception:
             cuda_available = False
             gpu_name = None
+            gpu_memory_gb = None
 
         recommended_torch_variant = "cu128" if cuda_available else "cpu"
+        recommended_generator_load_preset = "standard"
+        if cuda_available:
+            if gpu_memory_gb is not None and gpu_memory_gb <= 6:
+                recommended_generator_load_preset = "bnb_4bit"
+            elif gpu_memory_gb is not None and gpu_memory_gb <= 8:
+                recommended_generator_load_preset = "bnb_8bit"
+            else:
+                recommended_generator_load_preset = "standard"
         return {
             "cuda_available": cuda_available,
             "gpu_name": gpu_name,
+            "gpu_memory_gb": gpu_memory_gb,
             "recommended_torch_variant": recommended_torch_variant,
+            "recommended_generator_load_preset": recommended_generator_load_preset,
             "allowed_torch_variants": ["cpu", "cu128"] if cuda_available else ["cpu"],
         }
 

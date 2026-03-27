@@ -119,7 +119,9 @@ export type TorchVariant = {
 export type SetupComputeInfo = {
   cuda_available: boolean;
   gpu_name?: string | null;
+  gpu_memory_gb?: number | null;
   recommended_torch_variant: string;
+  recommended_generator_load_preset: string;
   allowed_torch_variants: string[];
 };
 

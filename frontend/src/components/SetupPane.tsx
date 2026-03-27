@@ -5,7 +5,6 @@ import type {
   SetupStatus,
   SetupStartPayload,
   SetupOption,
-  TorchVariant,
 } from "../types";
 
 type SetupPaneProps = {
@@ -17,27 +16,52 @@ type SetupPaneProps = {
   onCancel: () => Promise<void>;
 };
 
-function SetupCardOption({
-  title,
-  body,
-  isSelected,
-  onClick,
-}: {
-  title: string;
-  body: string;
-  isSelected: boolean;
-  onClick: () => void;
-}) {
-  return (
-    <button
-      type="button"
-      className={isSelected ? "setup-card-option selected" : "setup-card-option"}
-      onClick={onClick}
-    >
-      <span className="setup-card-option-title">{title}</span>
-      <span className="setup-card-option-body">{body}</span>
-    </button>
-  );
+function generatorRuntimeGuide(
+  preset: GeneratorLoadPreset,
+  options: SetupOptions | null,
+): { vramRange: string; recommendation: string } {
+  const gpuName = options?.compute.gpu_name;
+  const gpuMemory = options?.compute.gpu_memory_gb;
+  const isRecommended = options?.compute.recommended_generator_load_preset === preset.key;
+  const detectedGpu = gpuName
+    ? gpuMemory
+      ? `${gpuName} with ${gpuMemory} GB VRAM`
+      : gpuName
+    : null;
+
+  switch (preset.key) {
+    case "standard":
+      return {
+        vramRange: "Best on 10 GB+ VRAM",
+        recommendation: isRecommended
+          ? `Recommended for ${detectedGpu ?? "your detected GPU"}. Highest quality and simplest loading path.`
+          : "Highest quality and simplest loading path when your GPU has comfortable VRAM headroom.",
+      };
+    case "bnb_8bit":
+      return {
+        vramRange: "Good fit for 7 to 9 GB VRAM",
+        recommendation: isRecommended
+          ? `Recommended for ${detectedGpu ?? "your detected GPU"}. Good balance between memory usage and quality.`
+          : "Strong default for mid-range NVIDIA GPUs that need lower VRAM usage without a big quality drop.",
+      };
+    case "bnb_4bit":
+      return {
+        vramRange: "Best fit for 4 to 6 GB VRAM",
+        recommendation: isRecommended
+          ? `Recommended for ${detectedGpu ?? "your detected GPU"}. Lowest VRAM path on CUDA, with some quality tradeoff.`
+          : "Use this for smaller NVIDIA GPUs where the standard loader may not fit in memory.",
+      };
+    case "cpu_safe":
+      return {
+        vramRange: "GPU VRAM not required",
+        recommendation: "Use this when CUDA is unavailable or the GPU is too small.",
+      };
+    default:
+      return {
+        vramRange: preset.memory_hint,
+        recommendation: preset.description,
+      };
+  }
 }
 
 function findOptionByKey<T extends { key: string }>(options: T[], key: string | null | undefined) {
@@ -46,6 +70,42 @@ function findOptionByKey<T extends { key: string }>(options: T[], key: string | 
   }
 
   return options.find((option) => option.key === key) ?? null;
+}
+
+function formatSetupOptionLabel(option: SetupOption) {
+  return option.size_hint ? `${option.label} · ${option.size_hint}` : option.label;
+}
+
+function SetupSelectField({
+  label,
+  value,
+  onChange,
+  items,
+  helper,
+}: {
+  label: string;
+  value: string;
+  onChange: (value: string) => void;
+  items: Array<{ value: string; label: string }>;
+  helper: string;
+}) {
+  return (
+    <label className="setup-select-field">
+      <span className="setup-select-label">{label}</span>
+      <select
+        className="setup-select-input"
+        value={value}
+        onChange={(event) => onChange(event.target.value)}
+      >
+        {items.map((item) => (
+          <option key={item.value} value={item.value}>
+            {item.label}
+          </option>
+        ))}
+      </select>
+      <span className="setup-select-helper">{helper}</span>
+    </label>
+  );
 }
 
 export function SetupPane({
@@ -88,6 +148,7 @@ export function SetupPane({
       }
       return (
         status?.selected_generator_load_preset ??
+        options.compute.recommended_generator_load_preset ??
         options.generator_load_presets[0]?.key ??
         ""
       );
@@ -157,6 +218,14 @@ export function SetupPane({
   const embeddingSelection = findOptionByKey(options?.embedding_models ?? [], embeddingKey);
   const presetSelection = findOptionByKey(options?.generator_load_presets ?? [], generatorLoadPreset);
   const torchSelection = findOptionByKey(options?.torch_variants ?? [], torchVariant);
+  const presetGuide = presetSelection ? generatorRuntimeGuide(presetSelection, options) : null;
+  const detectedGpuLabel = options?.compute.cuda_available
+    ? options.compute.gpu_name
+      ? options.compute.gpu_memory_gb
+        ? `${options.compute.gpu_name} · ${options.compute.gpu_memory_gb} GB VRAM`
+        : options.compute.gpu_name
+      : "NVIDIA GPU detected"
+    : "CPU-only system";
 
   return (
     <div className="setup-shell">
@@ -164,9 +233,10 @@ export function SetupPane({
         <p className="setup-kicker">Desktop bootstrap setup</p>
         <h1>Prepare the local runtime before opening the workspace.</h1>
         <p className="setup-copy">
-          This first-run flow creates the managed environment under
-          <code>%LOCALAPPDATA%\LocalDocumentIntelligence</code>, installs the selected
-          runtime, and downloads the models you need.
+          Choose the local generator, embedding model, and runtime path. The installer
+          creates the managed environment under
+          <code>%LOCALAPPDATA%\LocalDocumentIntelligence</code> and downloads only what
+          this machine needs.
         </p>
 
         <div className="setup-status-banner">
@@ -184,6 +254,19 @@ export function SetupPane({
           </span>
         </div>
 
+        <div className="setup-hardware-strip">
+          <div className="setup-hardware-item">
+            <span className="setup-hardware-label">Detected hardware</span>
+            <span className="setup-hardware-value">{detectedGpuLabel}</span>
+          </div>
+          <div className="setup-hardware-item">
+            <span className="setup-hardware-label">Suggested runtime</span>
+            <span className="setup-hardware-value">
+              {presetSelection?.label ?? "Select a runtime preset"}
+            </span>
+          </div>
+        </div>
+
         {(error || submitError || status?.last_error) && (
           <p className="query-error">
             {submitError ?? error ?? status?.last_error ?? "Unknown setup error."}
@@ -195,80 +278,72 @@ export function SetupPane({
         <div className="setup-panel">
           <div className="setup-panel-header">
             <h2>Generator model</h2>
-            <p>Choose the local model used for grounded answers and chat.</p>
+            <p>Model used for grounded answers and chat.</p>
           </div>
-          <div className="setup-option-grid">
-            {(options?.generator_models ?? []).map((option: SetupOption) => (
-              <SetupCardOption
-                key={option.key}
-                title={`${option.label}${option.size_hint ? ` · ${option.size_hint}` : ""}`}
-                body={option.description ?? option.repo_id ?? option.key}
-                isSelected={generatorKey === option.key}
-                onClick={() => setGeneratorKey(option.key)}
-              />
-            ))}
-          </div>
+          <SetupSelectField
+            label="Generator"
+            value={generatorKey}
+            onChange={setGeneratorKey}
+            items={(options?.generator_models ?? []).map((option) => ({
+              value: option.key,
+              label: formatSetupOptionLabel(option),
+            }))}
+            helper={generatorSelection?.description ?? generatorSelection?.repo_id ?? "Select a local generator."}
+          />
         </div>
 
         <div className="setup-panel">
           <div className="setup-panel-header">
             <h2>Embedding model</h2>
-            <p>Choose the dense retriever that powers document search.</p>
+            <p>Retriever used for local document search.</p>
           </div>
-          <div className="setup-option-grid">
-            {(options?.embedding_models ?? []).map((option: SetupOption) => (
-              <SetupCardOption
-                key={option.key}
-                title={`${option.label}${option.size_hint ? ` · ${option.size_hint}` : ""}`}
-                body={option.description ?? option.repo_id ?? option.key}
-                isSelected={embeddingKey === option.key}
-                onClick={() => setEmbeddingKey(option.key)}
-              />
-            ))}
-          </div>
+          <SetupSelectField
+            label="Embedder"
+            value={embeddingKey}
+            onChange={setEmbeddingKey}
+            items={(options?.embedding_models ?? []).map((option) => ({
+              value: option.key,
+              label: formatSetupOptionLabel(option),
+            }))}
+            helper={embeddingSelection?.description ?? embeddingSelection?.repo_id ?? "Select a retrieval embedding model."}
+          />
         </div>
 
         <div className="setup-panel">
           <div className="setup-panel-header">
             <h2>Generator runtime</h2>
-            <p>
-              Standard keeps maximum compatibility. Bitsandbytes presets lower VRAM use
-              when CUDA is available.
-            </p>
+            <p>Pick the memory profile that best matches the available VRAM.</p>
           </div>
-          <div className="setup-option-grid">
-            {(options?.generator_load_presets ?? []).map((preset: GeneratorLoadPreset) => (
-              <SetupCardOption
-                key={preset.key}
-                title={preset.label}
-                body={`${preset.description} ${preset.memory_hint}`}
-                isSelected={generatorLoadPreset === preset.key}
-                onClick={() => setGeneratorLoadPreset(preset.key)}
-              />
-            ))}
-          </div>
+          <SetupSelectField
+            label="Runtime preset"
+            value={generatorLoadPreset}
+            onChange={setGeneratorLoadPreset}
+            items={(options?.generator_load_presets ?? []).map((preset) => {
+              const guide = generatorRuntimeGuide(preset, options);
+              return {
+                value: preset.key,
+                label: `${preset.label} · ${guide.vramRange}`,
+              };
+            })}
+            helper={presetGuide ? `${presetGuide.recommendation} ${presetSelection?.description ?? ""}` : "Select a runtime preset."}
+          />
         </div>
 
         <div className="setup-panel">
           <div className="setup-panel-header">
             <h2>PyTorch runtime</h2>
-            <p>
-              {options?.compute.cuda_available
-                ? `Detected NVIDIA GPU: ${options.compute.gpu_name ?? "CUDA available"}.`
-                : "No NVIDIA GPU detected. CPU runtime is recommended."}
-            </p>
+            <p>Install the backend runtime for CPU or NVIDIA CUDA.</p>
           </div>
-          <div className="setup-option-grid">
-            {(options?.torch_variants ?? []).map((variant: TorchVariant) => (
-              <SetupCardOption
-                key={variant.key}
-                title={variant.label}
-                body={variant.description}
-                isSelected={torchVariant === variant.key}
-                onClick={() => setTorchVariant(variant.key)}
-              />
-            ))}
-          </div>
+          <SetupSelectField
+            label="PyTorch build"
+            value={torchVariant}
+            onChange={setTorchVariant}
+            items={(options?.torch_variants ?? []).map((variant) => ({
+              value: variant.key,
+              label: variant.label,
+            }))}
+            helper={torchSelection?.description ?? "Select the runtime backend."}
+          />
         </div>
       </section>
 
