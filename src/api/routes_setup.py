@@ -6,6 +6,7 @@ from fastapi import APIRouter, Depends, HTTPException, status
 
 from src.api.app_state import get_setup_service_from_state
 from src.api.models_setup import (
+    RuntimeSettingsRequest,
     SetupOptionsResponse,
     SetupStartRequest,
     SetupStatusResponse,
@@ -88,3 +89,28 @@ def cancel_setup(
     return SetupStatusResponse.model_validate(
         setup_service.cancel_install().model_dump()
     )
+
+
+@router.post("/runtime", response_model=SetupStatusResponse)
+def apply_runtime_settings(
+    request: RuntimeSettingsRequest,
+    setup_service: SetupService = Depends(get_setup_service_from_state),
+) -> SetupStatusResponse:
+    """Apply post-setup generator runtime settings without rerunning setup."""
+    try:
+        status_payload = setup_service.apply_runtime_settings(
+            generator_key=request.generator_key,
+            generator_load_preset=request.generator_load_preset,
+        )
+    except ValueError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=str(exc),
+        ) from exc
+    except RuntimeError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail=str(exc),
+        ) from exc
+
+    return SetupStatusResponse.model_validate(status_payload.model_dump())

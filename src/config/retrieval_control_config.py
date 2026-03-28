@@ -24,6 +24,7 @@ class AutoControllerConfig:
         "or should trigger document retrieval. "
         "Return only valid JSON. Do not add explanation before or after the JSON."
     )
+    
     user_instruction: str = (
         "Choose retrieve when the user asks about documents, files, papers, contracts, "
         "reports, notes, uploaded materials, or asks for summaries, explanations, "

@@ -94,6 +94,7 @@ export type SetupOption = {
   description?: string | null;
   size_hint?: string | null;
   repo_id?: string | null;
+  is_downloaded?: boolean | null;
 };
 
 export type GeneratorLoadPreset = {
@@ -166,4 +167,9 @@ export type SetupStartPayload = {
   embedding_key: string;
   generator_load_preset: string;
   torch_variant: string;
+};
+
+export type RuntimeSettingsPayload = {
+  generator_key: string;
+  generator_load_preset: string;
 };

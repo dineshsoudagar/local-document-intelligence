@@ -79,6 +79,17 @@ TORCH_VARIANTS: dict[str, TorchVariantSpec] = {
 PROGRESS_EVENT_PREFIX = "LDI_PROGRESS "
 OVERALL_PACKAGE_WEIGHT = 55
 OVERALL_MODEL_WEIGHT = 45
+HF_CONFIG_MARKERS = (
+    "config.json",
+    "tokenizer_config.json",
+    "preprocessor_config.json",
+)
+HF_WEIGHT_PATTERNS = (
+    "*.safetensors",
+    "*.bin",
+    "*.onnx",
+    "*.gguf",
+)
 
 
 class SetupService:
@@ -122,17 +133,15 @@ class SetupService:
             return status
 
         if self._runtime_controller.is_ready() or config.install_state == "ready":
-            if status.install_state != "ready" or status.is_busy:
-                status = status.with_updates(
-                    install_state="ready",
-                    current_step="ready",
-                    progress_message="Runtime is ready.",
-                    last_error=None,
-                    cancel_requested=False,
-                    is_busy=False,
-                    completed_at=status.completed_at or utc_now_iso(),
-                )
-                save_setup_status(self._paths.setup_status_path, status)
+            selection_changed = (
+                status.selected_generator_key != config.selected_generator_key
+                or status.selected_embedding_key != config.selected_embedding_key
+                or status.selected_generator_load_preset
+                != config.selected_generator_load_preset
+                or status.selected_torch_variant != config.selected_torch_variant
+            )
+            if status.install_state != "ready" or status.is_busy or selection_changed:
+                return self._sync_ready_status(config)
             return status
         return status
 
@@ -148,7 +157,7 @@ class SetupService:
             presets.append(preset)
 
         return {
-            "generator_models": self._catalog.generator_choices(),
+            "generator_models": self._generator_option_payloads(),
             "embedding_models": self._catalog.embedding_choices(),
             "generator_load_presets": presets,
             "compute": compute,
@@ -202,6 +211,78 @@ class SetupService:
         )
         return self._start_worker(retry_config)
 
+    def apply_runtime_settings(
+        self,
+        *,
+        generator_key: str,
+        generator_load_preset: str,
+    ) -> SetupStatus:
+        """Apply a post-setup generator and runtime preset switch."""
+        if self.get_status().is_busy:
+            raise RuntimeError("Setup is already running.")
+
+        current_config = load_managed_app_config(self._paths.runtime_config_path)
+        if current_config.install_state != "ready":
+            raise RuntimeError("Runtime is not ready yet.")
+        if not current_config.selected_embedding_key or not current_config.selected_torch_variant:
+            raise RuntimeError("Current runtime configuration is incomplete.")
+
+        self._validate_selection(
+            generator_key=generator_key,
+            embedding_key=current_config.selected_embedding_key,
+            generator_load_preset=generator_load_preset,
+            torch_variant=current_config.selected_torch_variant,
+        )
+
+        entry = self._catalog.get_hf_model(generator_key)
+        if not self._is_model_entry_downloaded(entry):
+            raise ValueError(
+                f"{entry.label or generator_key} is not installed yet. Install it through setup first."
+            )
+
+        if (
+            current_config.selected_generator_key == generator_key
+            and current_config.selected_generator_load_preset == generator_load_preset
+        ):
+            return self._sync_ready_status(
+                current_config,
+                progress_message="Runtime settings are already up to date.",
+            )
+
+        next_config = current_config.model_copy(
+            update={
+                "selected_generator_key": generator_key,
+                "selected_generator_load_preset": generator_load_preset,
+                "install_state": "ready",
+            }
+        )
+
+        persisted_next_config = save_managed_app_config(
+            self._paths.runtime_config_path,
+            next_config,
+        )
+        if self._runtime_controller.reload():
+            return self._sync_ready_status(
+                persisted_next_config,
+                progress_message="Runtime settings updated.",
+            )
+
+        apply_error = self._runtime_controller.last_error or "Runtime reload failed."
+        restored_config = save_managed_app_config(
+            self._paths.runtime_config_path,
+            current_config.model_copy(update={"install_state": "ready"}),
+        )
+        restored_ok = self._runtime_controller.reload()
+        if restored_ok:
+            self._sync_ready_status(restored_config)
+            raise RuntimeError(f"Failed to apply runtime settings: {apply_error}")
+
+        restore_error = self._runtime_controller.last_error or "Unknown restore failure."
+        raise RuntimeError(
+            "Failed to apply runtime settings: "
+            f"{apply_error}. Also failed to restore the previous runtime: {restore_error}"
+        )
+
     def cancel_install(self) -> SetupStatus:
         """Request cancellation for the active setup run."""
         with self._lock:
@@ -232,6 +313,72 @@ class SetupService:
         ]
         deduped_keys = [key for key in dict.fromkeys(selected_keys) if key]
         return [self._catalog.get(key) for key in deduped_keys]
+
+    def _generator_option_payloads(self) -> list[dict[str, Any]]:
+        """Return generator options including local download status."""
+        payloads: list[dict[str, Any]] = []
+        for option in self._catalog.generator_choices():
+            entry = self._catalog.get_hf_model(option["key"])
+            payloads.append(
+                {
+                    **option,
+                    "is_downloaded": self._is_model_entry_downloaded(entry),
+                }
+            )
+        return payloads
+
+    def _has_any_matching_file(
+        self,
+        root: Path,
+        patterns: tuple[str, ...],
+    ) -> bool:
+        """Return whether the directory tree contains a file matching any pattern."""
+        if not root.is_dir():
+            return False
+
+        for pattern in patterns:
+            if any(path.is_file() for path in root.rglob(pattern)):
+                return True
+        return False
+
+    def _is_model_entry_downloaded(self, entry: ModelEntry) -> bool:
+        """Return whether one Hugging Face model appears to be fully available locally."""
+        target_dir = entry.resolve_dir(
+            project_root=self._paths.app_root,
+            models_root=self._catalog.models_root,
+        )
+        if not target_dir.is_dir():
+            return False
+
+        has_config = any((target_dir / marker).is_file() for marker in HF_CONFIG_MARKERS)
+        if not has_config:
+            return False
+
+        return self._has_any_matching_file(target_dir, HF_WEIGHT_PATTERNS)
+
+    def _sync_ready_status(
+        self,
+        config: ManagedAppConfig,
+        *,
+        progress_message: str | None = None,
+    ) -> SetupStatus:
+        """Persist the active runtime selection on the ready status payload."""
+        current_status = load_setup_status(self._paths.setup_status_path)
+        return self._write_status(
+            install_state="ready",
+            current_step="ready",
+            progress_message=progress_message
+            or current_status.progress_message
+            or "Runtime is ready.",
+            last_error=None,
+            cancel_requested=False,
+            is_busy=False,
+            selected_generator_key=config.selected_generator_key,
+            selected_embedding_key=config.selected_embedding_key,
+            selected_generator_load_preset=config.selected_generator_load_preset,
+            selected_torch_variant=config.selected_torch_variant,
+            completed_at=current_status.completed_at or utc_now_iso(),
+        )
 
     def _build_model_progress_items(
         self,

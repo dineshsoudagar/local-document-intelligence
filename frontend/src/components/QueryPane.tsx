@@ -13,8 +13,10 @@ type QueryPaneProps = {
   isSubmitting: boolean;
   isUploading: boolean;
   uploadError: string | null;
+  isRuntimeSettingsDisabled: boolean;
   onModeChange: (mode: UiQueryMode) => void;
   onQueryTextChange: (value: string) => void;
+  onOpenRuntimeSettings: () => void;
   onSubmit: () => void;
   onStop: () => void;
   onToggleTheme: () => void;
@@ -32,8 +34,10 @@ export function QueryPane({
   isSubmitting,
   isUploading,
   uploadError,
+  isRuntimeSettingsDisabled,
   onModeChange,
   onQueryTextChange,
+  onOpenRuntimeSettings,
   onSubmit,
   onStop,
   onToggleTheme,
@@ -184,31 +188,42 @@ export function QueryPane({
             </p>
           </div>
 
-          <button
-            type="button"
-            className="theme-toggle"
-            onClick={onToggleTheme}
-            aria-label={theme === "light" ? "Switch to dark mode" : "Switch to light mode"}
-            title={theme === "light" ? "Switch to dark mode" : "Switch to light mode"}
-          >
-            {theme === "light" ? (
-              <svg viewBox="0 0 24 24" aria-hidden="true">
-                <path d="M21 12.8A9 9 0 1 1 11.2 3a7 7 0 0 0 9.8 9.8Z" />
-              </svg>
-            ) : (
-              <svg viewBox="0 0 24 24" aria-hidden="true">
-                <circle cx="12" cy="12" r="4" />
-                <path d="M12 2v2.5" />
-                <path d="M12 19.5V22" />
-                <path d="M4.93 4.93l1.77 1.77" />
-                <path d="M17.3 17.3l1.77 1.77" />
-                <path d="M2 12h2.5" />
-                <path d="M19.5 12H22" />
-                <path d="M4.93 19.07l1.77-1.77" />
-                <path d="M17.3 6.7l1.77-1.77" />
-              </svg>
-            )}
-          </button>
+          <div className="center-header-actions">
+            <button
+              type="button"
+              className="header-action-button"
+              onClick={onOpenRuntimeSettings}
+              disabled={isRuntimeSettingsDisabled}
+            >
+              Runtime settings
+            </button>
+
+            <button
+              type="button"
+              className="theme-toggle"
+              onClick={onToggleTheme}
+              aria-label={theme === "light" ? "Switch to dark mode" : "Switch to light mode"}
+              title={theme === "light" ? "Switch to dark mode" : "Switch to light mode"}
+            >
+              {theme === "light" ? (
+                <svg viewBox="0 0 24 24" aria-hidden="true">
+                  <path d="M21 12.8A9 9 0 1 1 11.2 3a7 7 0 0 0 9.8 9.8Z" />
+                </svg>
+              ) : (
+                <svg viewBox="0 0 24 24" aria-hidden="true">
+                  <circle cx="12" cy="12" r="4" />
+                  <path d="M12 2v2.5" />
+                  <path d="M12 19.5V22" />
+                  <path d="M4.93 4.93l1.77 1.77" />
+                  <path d="M17.3 17.3l1.77 1.77" />
+                  <path d="M2 12h2.5" />
+                  <path d="M19.5 12H22" />
+                  <path d="M4.93 19.07l1.77-1.77" />
+                  <path d="M17.3 6.7l1.77-1.77" />
+                </svg>
+              )}
+            </button>
+          </div>
         </div>
       </div>
 

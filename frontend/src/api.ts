@@ -6,6 +6,7 @@ import type {
   QueryStreamDone,
   QueryStreamEvent,
   QueryStreamStart,
+  RuntimeSettingsPayload,
   SetupOptions,
   SetupStartPayload,
   SetupStatus,
@@ -213,6 +214,22 @@ export async function cancelSetup() {
 
   if (!response.ok) {
     throw new Error(await readErrorMessage(response, "Failed to cancel setup"));
+  }
+
+  return (await response.json()) as SetupStatus;
+}
+
+export async function applyRuntimeSettings(payload: RuntimeSettingsPayload) {
+  const response = await fetch(apiUrl("/setup/runtime"), {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+    },
+    body: JSON.stringify(payload),
+  });
+
+  if (!response.ok) {
+    throw new Error(await readErrorMessage(response, "Failed to update runtime settings"));
   }
 
   return (await response.json()) as SetupStatus;

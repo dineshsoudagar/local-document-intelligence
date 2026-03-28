@@ -30,6 +30,22 @@ class SetupStartRequest(BaseModel):
         return value
 
 
+class RuntimeSettingsRequest(BaseModel):
+    """Request payload for switching the active runtime generator settings."""
+
+    generator_key: str
+    generator_load_preset: str
+
+    @field_validator("generator_key", "generator_load_preset")
+    @classmethod
+    def validate_non_empty(cls, value: str) -> str:
+        """Normalize and validate required runtime-setting selections."""
+        value = value.strip()
+        if not value:
+            raise ValueError("runtime setting values must not be empty.")
+        return value
+
+
 class SetupStatusResponse(BaseModel):
     """Response payload describing current setup progress."""
 

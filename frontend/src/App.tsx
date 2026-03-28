@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import "./App.css";
 import {
+  applyRuntimeSettings,
   cancelSetup,
   deleteDocument,
   fetchDocuments,
@@ -13,6 +14,7 @@ import {
 } from "./api";
 import { DocumentsPane } from "./components/DocumentsPane";
 import { QueryPane } from "./components/QueryPane";
+import { RuntimeSettingsModal } from "./components/RuntimeSettingsModal";
 import { SetupPane } from "./components/SetupPane";
 import type {
   ChatMessage,
@@ -20,6 +22,7 @@ import type {
   DocumentItem,
   QueryRequestPayload,
   QueryStatus,
+  RuntimeSettingsPayload,
   SetupOptions,
   SetupStatus,
   UiQueryMode,
@@ -54,9 +57,14 @@ export default function App() {
   const [setupStatus, setSetupStatus] = useState<SetupStatus | null>(null);
   const [setupError, setSetupError] = useState<string | null>(null);
   const [isSetupLoading, setIsSetupLoading] = useState(true);
+  const [isRuntimeSettingsOpen, setIsRuntimeSettingsOpen] = useState(false);
+  const [runtimeSettingsError, setRuntimeSettingsError] = useState<string | null>(null);
+  const [isApplyingRuntimeSettings, setIsApplyingRuntimeSettings] = useState(false);
   const abortControllerRef = useRef<AbortController | null>(null);
 
   const isRuntimeReady = setupStatus?.install_state === "ready";
+  const isQueryBusy = isSubmitting;
+  const isRuntimeSettingsDisabled = isQueryBusy || isApplyingRuntimeSettings;
 
   function updateMessage(
     messageId: string,
@@ -216,6 +224,13 @@ export default function App() {
   }, [setupStatus?.install_state]);
 
   useEffect(() => {
+    if (!isRuntimeReady) {
+      setIsRuntimeSettingsOpen(false);
+      setRuntimeSettingsError(null);
+    }
+  }, [isRuntimeReady]);
+
+  useEffect(() => {
     function handleWindowClick() {
       setOpenMenuDocId(null);
     }
@@ -274,6 +289,41 @@ export default function App() {
     setSetupError(null);
     const nextStatus = await cancelSetup();
     setSetupStatus(nextStatus);
+  }
+
+  function handleOpenRuntimeSettings() {
+    if (isRuntimeSettingsDisabled) {
+      return;
+    }
+
+    setRuntimeSettingsError(null);
+    setIsRuntimeSettingsOpen(true);
+  }
+
+  function handleCloseRuntimeSettings() {
+    if (isApplyingRuntimeSettings) {
+      return;
+    }
+
+    setRuntimeSettingsError(null);
+    setIsRuntimeSettingsOpen(false);
+  }
+
+  async function handleApplyRuntimeSettings(payload: RuntimeSettingsPayload) {
+    setRuntimeSettingsError(null);
+    setIsApplyingRuntimeSettings(true);
+
+    try {
+      const nextStatus = await applyRuntimeSettings(payload);
+      setSetupStatus(nextStatus);
+      setIsRuntimeSettingsOpen(false);
+    } catch (err) {
+      setRuntimeSettingsError(
+        err instanceof Error ? err.message : "Failed to update runtime settings.",
+      );
+    } finally {
+      setIsApplyingRuntimeSettings(false);
+    }
   }
 
   async function handleSubmit() {
@@ -522,8 +572,22 @@ export default function App() {
         onToggleTheme={() =>
           setTheme((currentTheme) => (currentTheme === "light" ? "dark" : "light"))
         }
+        onOpenRuntimeSettings={handleOpenRuntimeSettings}
+        isRuntimeSettingsDisabled={isRuntimeSettingsDisabled}
         onUploadFile={handleUploadFile}
       />
+
+      {isRuntimeSettingsOpen && setupOptions && setupStatus && (
+        <RuntimeSettingsModal
+          options={setupOptions}
+          status={setupStatus}
+          error={runtimeSettingsError}
+          isApplying={isApplyingRuntimeSettings}
+          isQueryBusy={isQueryBusy}
+          onClose={handleCloseRuntimeSettings}
+          onApply={handleApplyRuntimeSettings}
+        />
+      )}
     </div>
   );
 }
