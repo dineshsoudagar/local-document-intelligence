@@ -1226,6 +1226,21 @@ body[data-theme="dark"] .document-menu-item.delete:hover:not(:disabled) {
   line-height: 1.4;
 }
 
+.setup-progress-card-meta {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  margin-bottom: 8px;
+}
+
+.setup-progress-current-label {
+  margin: 0;
+  color: #16324f;
+  font-size: 12px;
+  font-weight: 700;
+}
+
 .setup-model-progress-list {
   display: grid;
   gap: 10px;
@@ -1597,7 +1612,8 @@ body[data-theme="dark"] .setup-model-progress-row {
 }
 
 body[data-theme="dark"] .setup-progress-heading,
-body[data-theme="dark"] .setup-model-progress-header {
+body[data-theme="dark"] .setup-model-progress-header,
+body[data-theme="dark"] .setup-progress-current-label {
   color: #16324f;
 }
 

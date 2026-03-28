@@ -92,6 +92,63 @@ function formatProgressStateLabel(item: SetupProgressItem) {
   }
 }
 
+function buildCurrentProgress(status: SetupStatus | null) {
+  if (!status) {
+    return null;
+  }
+
+  const items = status.model_progress_items ?? [];
+  if (status.current_step === "download_models" && items.length > 0) {
+    const activeItem =
+      items.find((item) => item.status === "running") ??
+      items.find((item) => item.status === "pending") ??
+      items.find((item) => item.status === "complete" || item.status === "skipped") ??
+      items[0];
+
+    const completedCount = items.filter(
+      (item) => item.status === "complete" || item.status === "skipped",
+    ).length;
+    const ordinal =
+      activeItem.status === "pending" ? Math.min(completedCount + 1, items.length) : completedCount;
+
+    return {
+      variant: "item" as const,
+      title: `Current download${items.length > 1 ? ` · ${Math.max(ordinal, 1)} of ${items.length}` : ""}`,
+      label: activeItem.label,
+      progress: activeItem.progress,
+      detail:
+        activeItem.detail ??
+        (activeItem.status === "pending"
+          ? "Queued to download next."
+          : "Downloading this asset into the local models directory."),
+      stateClass: activeItem.status,
+      stateLabel: formatProgressStateLabel(activeItem),
+    };
+  }
+
+  const packageState =
+    status.install_state === "failed"
+      ? "failed"
+      : status.install_state === "ready"
+        ? "complete"
+        : "running";
+
+  return {
+    variant: "package" as const,
+    title: "Current progress",
+    label: "Packages and runtime",
+    progress: status.package_progress ?? 0,
+    detail: status.package_message ?? status.progress_message ?? "Waiting for setup to start.",
+    stateClass: packageState,
+    stateLabel:
+      packageState === "failed"
+        ? "Failed"
+        : packageState === "complete"
+          ? "Ready"
+          : "Installing",
+  };
+}
+
 function SetupSelectField({
   label,
   value,
@@ -247,6 +304,7 @@ export function SetupPane({
     Boolean(status?.model_progress_items.length) ||
     status?.install_state === "ready" ||
     status?.install_state === "failed";
+  const currentProgress = buildCurrentProgress(status);
 
   return (
     <div className="setup-shell">
@@ -293,47 +351,35 @@ export function SetupPane({
               </p>
             </div>
 
-            <div className="setup-progress-card">
-              <div className="setup-progress-heading">
-                <span>Packages and runtime</span>
-                <strong>{status?.package_progress ?? 0}%</strong>
-              </div>
-              <div className="setup-progress-track package">
+            {currentProgress && (
+              <div className="setup-progress-card">
+                <div className="setup-progress-heading">
+                  <span>{currentProgress.title}</span>
+                  <strong>{currentProgress.progress}%</strong>
+                </div>
+                <div className="setup-progress-card-meta">
+                  <p className="setup-progress-current-label">{currentProgress.label}</p>
+                  <span className={`setup-model-progress-state ${currentProgress.stateClass}`}>
+                    {currentProgress.stateLabel}
+                  </span>
+                </div>
                 <div
-                  className="setup-progress-fill package"
-                  style={{ width: `${status?.package_progress ?? 0}%` }}
-                />
-              </div>
-              <p className="setup-progress-caption">
-                {status?.package_message ?? "The managed runtime has not started yet."}
-              </p>
-            </div>
-
-            {Boolean(status?.model_progress_items.length) && (
-              <div className="setup-model-progress-list">
-                {status?.model_progress_items.map((item) => (
-                  <div key={item.key} className="setup-model-progress-row">
-                    <div className="setup-model-progress-header">
-                      <span>{item.label}</span>
-                      <span className={`setup-model-progress-state ${item.status}`}>
-                        {formatProgressStateLabel(item)}
-                      </span>
-                    </div>
-                    <div
-                      className={`setup-progress-track item ${
-                        item.status === "running" ? "is-running" : ""
-                      }`}
-                    >
-                      <div
-                        className={`setup-progress-fill item ${item.status}`}
-                        style={{ width: `${item.progress}%` }}
-                      />
-                    </div>
-                    <p className="setup-model-progress-detail">
-                      {item.detail ?? "Waiting for this asset to be processed."}
-                    </p>
-                  </div>
-                ))}
+                  className={`setup-progress-track ${
+                    currentProgress.variant === "item"
+                      ? `item ${currentProgress.stateClass === "running" ? "is-running" : ""}`
+                      : "package"
+                  }`}
+                >
+                  <div
+                    className={
+                      currentProgress.variant === "item"
+                        ? `setup-progress-fill item ${currentProgress.stateClass}`
+                        : "setup-progress-fill package"
+                    }
+                    style={{ width: `${currentProgress.progress}%` }}
+                  />
+                </div>
+                <p className="setup-progress-caption">{currentProgress.detail}</p>
               </div>
             )}
           </div>
