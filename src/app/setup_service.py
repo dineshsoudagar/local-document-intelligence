@@ -2,11 +2,13 @@
 
 from __future__ import annotations
 
+import json
 import os
 import subprocess
 import sys
 import threading
 import time
+from collections.abc import Callable
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
@@ -15,6 +17,7 @@ from src.app.paths import AppPaths
 from src.app.runtime_controller import RuntimeController
 from src.app.runtime_state import (
     ManagedAppConfig,
+    SetupProgressItem,
     SetupStatus,
     load_managed_app_config,
     load_setup_status,
@@ -23,7 +26,7 @@ from src.app.runtime_state import (
     utc_now_iso,
 )
 from src.config.generator_config import GeneratorConfig
-from src.config.model_catalog import ModelCatalog, default_pipeline_models
+from src.config.model_catalog import ArtifactEntry, ModelCatalog, ModelEntry, default_pipeline_models
 
 
 class SetupCancelledError(RuntimeError):
@@ -66,6 +69,10 @@ TORCH_VARIANTS: dict[str, TorchVariantSpec] = {
         index_url="https://download.pytorch.org/whl/cu128",
     ),
 }
+
+PROGRESS_EVENT_PREFIX = "LDI_PROGRESS "
+OVERALL_PACKAGE_WEIGHT = 55
+OVERALL_MODEL_WEIGHT = 45
 
 
 class SetupService:
@@ -205,6 +212,179 @@ class SetupService:
 
         return status
 
+    def _selected_download_entries(
+        self,
+        config: ManagedAppConfig,
+    ) -> list[ModelEntry | ArtifactEntry]:
+        """Return the deduplicated assets the installer will materialize."""
+        defaults = default_pipeline_models()
+        selected_keys = [
+            config.selected_generator_key,
+            config.selected_embedding_key,
+            defaults.reranker_key,
+            defaults.docling_artifacts_key,
+        ]
+        deduped_keys = [key for key in dict.fromkeys(selected_keys) if key]
+        return [self._catalog.get(key) for key in deduped_keys]
+
+    def _build_model_progress_items(
+        self,
+        config: ManagedAppConfig,
+    ) -> list[SetupProgressItem]:
+        """Build pending progress rows for each required model or artifact."""
+        items: list[SetupProgressItem] = []
+        for entry in self._selected_download_entries(config):
+            label = entry.label if getattr(entry, "label", None) else entry.key
+            detail = getattr(entry, "repo_id", None)
+            items.append(
+                SetupProgressItem(
+                    key=entry.key,
+                    label=label,
+                    status="pending",
+                    progress=0,
+                    detail=detail,
+                )
+            )
+        return items
+
+    def _normalize_status_progress(self, status: SetupStatus) -> SetupStatus:
+        """Derive consistent overall and nested progress values for the UI."""
+        package_progress = max(0, min(100, status.package_progress))
+        items: list[SetupProgressItem] = []
+        for item in status.model_progress_items:
+            progress = max(0, min(100, item.progress))
+            if item.status in {"complete", "skipped"}:
+                progress = 100
+            items.append(item.model_copy(update={"progress": progress}))
+
+        if status.install_state == "ready":
+            items = [
+                item
+                if item.status in {"complete", "skipped"}
+                else item.model_copy(update={"status": "complete", "progress": 100})
+                for item in items
+            ]
+            return status.model_copy(
+                update={
+                    "overall_progress": 100,
+                    "package_progress": 100,
+                    "package_message": status.package_message
+                    or "Managed runtime packages installed.",
+                    "model_progress_items": items,
+                }
+            )
+
+        model_progress = 0
+        if items:
+            model_progress = round(
+                sum(item.progress for item in items) / len(items)
+            )
+
+        overall_progress = package_progress
+        if items:
+            overall_progress = round(
+                (package_progress * OVERALL_PACKAGE_WEIGHT / 100)
+                + (model_progress * OVERALL_MODEL_WEIGHT / 100)
+            )
+
+        return status.model_copy(
+            update={
+                "overall_progress": max(0, min(100, overall_progress)),
+                "package_progress": package_progress,
+                "model_progress_items": items,
+            }
+        )
+
+    def _set_model_progress_item(
+        self,
+        key: str,
+        *,
+        status: str,
+        progress: int,
+        detail: str | None = None,
+        progress_message: str | None = None,
+    ) -> SetupStatus:
+        """Update one model/artifact progress row and persist the result."""
+        current = load_setup_status(self._paths.setup_status_path)
+        updated_items: list[SetupProgressItem] = []
+        for item in current.model_progress_items:
+            if item.key == key:
+                updated_items.append(
+                    item.model_copy(
+                        update={
+                            "status": status,
+                            "progress": progress,
+                            "detail": detail if detail is not None else item.detail,
+                        }
+                    )
+                )
+            else:
+                updated_items.append(item)
+
+        payload: dict[str, object] = {"model_progress_items": updated_items}
+        if progress_message is not None:
+            payload["progress_message"] = progress_message
+        return self._write_status(**payload)
+
+    def _mark_running_model_items_failed(self, detail: str) -> None:
+        """Mark any in-flight model rows as failed after a downloader error."""
+        status = load_setup_status(self._paths.setup_status_path)
+        updated_items = [
+            item.model_copy(update={"status": "failed", "detail": detail})
+            if item.status == "running"
+            else item
+            for item in status.model_progress_items
+        ]
+        self._write_status(model_progress_items=updated_items)
+
+    def _handle_download_progress_line(self, line: str) -> None:
+        """Apply structured downloader progress events to persisted setup status."""
+        if not line.startswith(PROGRESS_EVENT_PREFIX):
+            return
+
+        try:
+            payload = json.loads(line[len(PROGRESS_EVENT_PREFIX) :])
+        except json.JSONDecodeError:
+            return
+
+        event = payload.get("event")
+        key = payload.get("key")
+        if not isinstance(key, str):
+            return
+
+        label = payload.get("label") if isinstance(payload.get("label"), str) else key
+        if event == "asset_skip":
+            self._set_model_progress_item(
+                key,
+                status="skipped",
+                progress=100,
+                detail="Already available locally.",
+                progress_message=f"{label} is already available locally.",
+            )
+            return
+
+        if event == "asset_start":
+            detail = payload.get("detail") if isinstance(payload.get("detail"), str) else None
+            self._set_model_progress_item(
+                key,
+                status="running",
+                progress=35,
+                detail=detail,
+                progress_message=f"Downloading {label}...",
+            )
+            return
+
+        if event == "asset_complete":
+            target_dir = payload.get("target_dir")
+            detail = target_dir if isinstance(target_dir, str) else "Saved locally."
+            self._set_model_progress_item(
+                key,
+                status="complete",
+                progress=100,
+                detail=detail,
+                progress_message=f"Finished downloading {label}.",
+            )
+
     def _start_worker(self, config: ManagedAppConfig) -> SetupStatus:
         """Persist the initial config/status and start the background worker."""
         with self._lock:
@@ -224,10 +404,17 @@ class SetupService:
                 selected_embedding_key=persisted_config.selected_embedding_key,
                 selected_generator_load_preset=persisted_config.selected_generator_load_preset,
                 selected_torch_variant=persisted_config.selected_torch_variant,
+                overall_progress=0,
+                package_progress=0,
+                package_message="Queued",
+                model_progress_items=self._build_model_progress_items(persisted_config),
                 started_at=utc_now_iso(),
                 completed_at=None,
             )
-            save_setup_status(self._paths.setup_status_path, status)
+            save_setup_status(
+                self._paths.setup_status_path,
+                self._normalize_status_progress(status),
+            )
 
             self._worker = threading.Thread(
                 target=self._run_install,
@@ -245,6 +432,8 @@ class SetupService:
             self._write_status(
                 current_step="prepare_directories",
                 progress_message="Creating managed runtime directories...",
+                package_progress=5,
+                package_message="Preparing managed runtime directories...",
             )
             self._paths.ensure_exists()
             self._check_cancel_requested()
@@ -256,6 +445,8 @@ class SetupService:
                 self._write_status(
                     current_step="create_venv",
                     progress_message="Creating managed virtual environment...",
+                    package_progress=18,
+                    package_message="Creating the managed Python environment...",
                 )
                 self._run_process(
                     [str(bootstrap_python), "-m", "venv", str(self._paths.managed_venv_dir)],
@@ -266,6 +457,8 @@ class SetupService:
             self._write_status(
                 current_step="upgrade_pip",
                 progress_message="Upgrading pip in the managed runtime...",
+                package_progress=34,
+                package_message="Upgrading pip in the managed environment...",
             )
             self._run_process(
                 [str(managed_python), "-m", "pip", "install", "--upgrade", "pip"],
@@ -276,6 +469,8 @@ class SetupService:
             self._write_status(
                 current_step="install_base_requirements",
                 progress_message="Installing bundled base Python packages...",
+                package_progress=62,
+                package_message="Installing bundled Python dependencies...",
             )
             self._install_base_requirements(managed_python)
             self._check_cancel_requested()
@@ -283,6 +478,8 @@ class SetupService:
             self._write_status(
                 current_step="install_torch",
                 progress_message="Installing PyTorch runtime...",
+                package_progress=84,
+                package_message="Installing the selected PyTorch runtime...",
             )
             self._install_torch(managed_python, config.selected_torch_variant or "cpu")
             self._check_cancel_requested()
@@ -291,6 +488,8 @@ class SetupService:
                 self._write_status(
                     current_step="install_bitsandbytes",
                     progress_message="Installing bitsandbytes for low-memory loading...",
+                    package_progress=92,
+                    package_message="Installing optional bitsandbytes support...",
                 )
                 self._run_process(
                     [str(managed_python), "-m", "pip", "install", "bitsandbytes"],
@@ -301,6 +500,8 @@ class SetupService:
             self._write_status(
                 current_step="download_models",
                 progress_message="Downloading selected models and offline artifacts...",
+                package_progress=100,
+                package_message="Managed runtime packages installed.",
             )
             self._download_selected_models(managed_python, config)
             self._check_cancel_requested()
@@ -314,6 +515,8 @@ class SetupService:
                 install_state="ready",
                 current_step="ready",
                 progress_message="Runtime is ready.",
+                package_progress=100,
+                package_message="Managed runtime packages installed.",
                 last_error=None,
                 cancel_requested=False,
                 is_busy=False,
@@ -333,6 +536,7 @@ class SetupService:
                 completed_at=utc_now_iso(),
             )
         except Exception as exc:
+            self._mark_running_model_items_failed(str(exc))
             save_managed_app_config(
                 self._paths.runtime_config_path,
                 config.model_copy(update={"install_state": "failed"}),
@@ -404,7 +608,12 @@ class SetupService:
         ]
         env = os.environ.copy()
         env["PYTHONPATH"] = str(self._paths.code_root)
-        self._run_process(args, cwd=self._paths.code_root, env=env)
+        self._run_process(
+            args,
+            cwd=self._paths.code_root,
+            env=env,
+            line_callback=self._handle_download_progress_line,
+        )
 
     def _run_process(
         self,
@@ -412,22 +621,59 @@ class SetupService:
         *,
         cwd: Path,
         env: dict[str, str] | None = None,
+        line_callback: Callable[[str], None] | None = None,
     ) -> None:
         """Run one subprocess while supporting cancellation and setup logging."""
+        process_env = os.environ.copy()
+        process_env.pop("PYTHONPATH", None)
+        process_env.pop("PYTHONHOME", None)
+        if env is not None:
+            process_env.update(env)
+
         self._paths.logs_dir.mkdir(parents=True, exist_ok=True)
         with self._log_path.open("a", encoding="utf-8") as log_file:
             log_file.write(f"\n[{utc_now_iso()}] RUN {' '.join(args)}\n")
             log_file.flush()
+            stdout_target: int | Any = log_file
+            stderr_target: int | Any = log_file
+            if line_callback is not None:
+                stdout_target = subprocess.PIPE
+                stderr_target = subprocess.STDOUT
             process = subprocess.Popen(
                 args,
                 cwd=str(cwd),
-                env=env,
-                stdout=log_file,
-                stderr=log_file,
+                env=process_env,
+                stdout=stdout_target,
+                stderr=stderr_target,
                 text=True,
+                bufsize=1,
             )
             with self._lock:
                 self._active_process = process
+
+            reader_thread: threading.Thread | None = None
+            if line_callback is not None and process.stdout is not None:
+                def stream_output() -> None:
+                    for raw_line in process.stdout:
+                        log_file.write(raw_line)
+                        log_file.flush()
+                        line = raw_line.rstrip()
+                        if not line:
+                            continue
+                        try:
+                            line_callback(line)
+                        except Exception as exc:  # pragma: no cover - best effort logging
+                            log_file.write(
+                                f"[{utc_now_iso()}] Progress callback error: {exc}\n"
+                            )
+                            log_file.flush()
+
+                reader_thread = threading.Thread(
+                    target=stream_output,
+                    daemon=True,
+                    name="ldi-setup-log-stream",
+                )
+                reader_thread.start()
 
             while True:
                 if process.poll() is not None:
@@ -442,6 +688,9 @@ class SetupService:
                     raise SetupCancelledError("Setup was cancelled by the user.")
                 time.sleep(0.5)
 
+            if reader_thread is not None:
+                reader_thread.join(timeout=10)
+
             if process.returncode != 0:
                 raise RuntimeError(
                     f"Command failed with exit code {process.returncode}: {' '.join(args)}"
@@ -455,13 +704,23 @@ class SetupService:
         embedded_python = self._paths.embedded_python_dir / "python.exe"
         if embedded_python.is_file():
             return embedded_python
+        if getattr(sys, "frozen", False):
+            raise RuntimeError(
+                "Packaged bootstrap Python runtime not found. "
+                f"Expected '{bundled_python}' or '{embedded_python}'. "
+                "Rebuild the desktop bundle so it includes bundle/python instead of "
+                "falling back to the launcher executable."
+            )
         return Path(sys.executable).resolve()
 
     def _write_status(self, **updates: object) -> SetupStatus:
         """Persist one status update."""
         status = load_setup_status(self._paths.setup_status_path)
         updated = status.with_updates(**updates)
-        return save_setup_status(self._paths.setup_status_path, updated)
+        return save_setup_status(
+            self._paths.setup_status_path,
+            self._normalize_status_progress(updated),
+        )
 
     def _cancel_requested(self) -> bool:
         """Return whether the persisted status requested cancellation."""

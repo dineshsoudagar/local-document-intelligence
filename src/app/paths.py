@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import os
 import sys
+import tempfile
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -13,30 +14,62 @@ APP_ROOT_ENV_VAR = "LDI_APP_ROOT"
 CODE_ROOT_ENV_VAR = "LDI_CODE_ROOT"
 
 
+def _can_prepare_directory(path: Path) -> bool:
+    """Return whether the process can create and write inside one directory."""
+    try:
+        path.mkdir(parents=True, exist_ok=True)
+        probe_path = path / ".ldi-write-test"
+        probe_path.write_text("ok", encoding="utf-8")
+        probe_path.unlink(missing_ok=True)
+        return True
+    except OSError:
+        return False
+
+
 def _default_app_root() -> Path:
     """Return the managed per-user application root."""
     configured = os.getenv(APP_ROOT_ENV_VAR)
     if configured:
-        return Path(configured).expanduser().resolve()
+        configured_path = Path(configured).expanduser().resolve()
+        if _can_prepare_directory(configured_path):
+            return configured_path
+
+    candidates: list[Path] = []
 
     local_app_data = os.getenv("LOCALAPPDATA")
     if local_app_data:
-        return Path(local_app_data).resolve() / APP_NAME
+        candidates.append(Path(local_app_data).resolve() / APP_NAME)
 
-    return Path.home().resolve() / "AppData" / "Local" / APP_NAME
+    candidates.append(Path.home().resolve() / "AppData" / "Local" / APP_NAME)
+    candidates.append(Path(tempfile.gettempdir()).resolve() / APP_NAME)
+
+    for candidate in candidates:
+        if _can_prepare_directory(candidate):
+            return candidate
+
+    return candidates[0]
 
 
 def _default_code_root() -> Path:
     """Return the code payload root for source and frozen launches."""
     configured = os.getenv(CODE_ROOT_ENV_VAR)
     if configured:
-        return Path(configured).expanduser().resolve()
+        configured_path = Path(configured).expanduser().resolve()
+        if getattr(sys, "frozen", False) and not (configured_path / "src").is_dir():
+            internal_dir = configured_path / "_internal"
+            if (internal_dir / "src").is_dir():
+                return internal_dir
+        return configured_path
 
     if getattr(sys, "frozen", False):
         meipass = getattr(sys, "_MEIPASS", None)
         if meipass:
             return Path(meipass).resolve()
-        return Path(sys.executable).resolve().parent
+        executable_dir = Path(sys.executable).resolve().parent
+        internal_dir = executable_dir / "_internal"
+        if (internal_dir / "src").is_dir():
+            return internal_dir
+        return executable_dir
 
     return Path(__file__).resolve().parents[2]
 

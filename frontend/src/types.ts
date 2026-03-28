@@ -137,6 +137,9 @@ export type SetupStatus = {
   install_state: "not_ready" | "installing" | "ready" | "failed";
   current_step?: string | null;
   progress_message?: string | null;
+  overall_progress: number;
+  package_progress: number;
+  package_message?: string | null;
   last_error?: string | null;
   cancel_requested: boolean;
   is_busy: boolean;
@@ -144,9 +147,18 @@ export type SetupStatus = {
   selected_embedding_key?: string | null;
   selected_generator_load_preset?: string | null;
   selected_torch_variant?: string | null;
+  model_progress_items: SetupProgressItem[];
   started_at?: string | null;
   completed_at?: string | null;
   updated_at: string;
+};
+
+export type SetupProgressItem = {
+  key: string;
+  label: string;
+  status: "pending" | "running" | "complete" | "skipped" | "failed";
+  progress: number;
+  detail?: string | null;
 };
 
 export type SetupStartPayload = {

@@ -36,6 +36,14 @@ HF_WEIGHT_PATTERNS = (
     "*.gguf",
 )
 
+PROGRESS_EVENT_PREFIX = "LDI_PROGRESS "
+
+
+def emit_progress(event: str, **payload: Any) -> None:
+    """Emit one machine-readable progress event for the desktop setup UI."""
+    message = {"event": event, **payload}
+    print(f"{PROGRESS_EVENT_PREFIX}{json.dumps(message)}", flush=True)
+
 def parse_args() -> argparse.Namespace:
     """Parse CLI arguments for local model and artifact download."""
     cli = argparse.ArgumentParser(
@@ -440,9 +448,22 @@ def main() -> None:
 
         for record in existing_records:
             print(f"Skipping {record['key']}: already present at {record['target_dir']}")
+            entry = MODEL_CATALOG.get(record["key"])
+            emit_progress(
+                "asset_skip",
+                key=record["key"],
+                label=getattr(entry, "label", None) or record["key"],
+                target_dir=record["target_dir"],
+            )
 
     for entry in models_to_download:
         print(f"Downloading {entry.key}: {entry.repo_id}")
+        emit_progress(
+            "asset_start",
+            key=entry.key,
+            label=entry.label or entry.key,
+            detail=entry.repo_id,
+        )
         record = download_hf_model(
             entry=entry,
             project_root=project_root,
@@ -450,10 +471,22 @@ def main() -> None:
             force=args.force,
         )
         records.append(record)
+        emit_progress(
+            "asset_complete",
+            key=entry.key,
+            label=entry.label or entry.key,
+            target_dir=record["target_dir"],
+        )
         print(f"Saved to: {record['target_dir']}")
 
     for entry in artifacts_to_download:
         print(f"Downloading {entry.key}: Docling offline artifacts")
+        emit_progress(
+            "asset_start",
+            key=entry.key,
+            label=entry.label or entry.key,
+            detail=entry.description or "Docling offline artifacts",
+        )
         record = download_docling_artifacts(
             entry=entry,
             project_root=project_root,
@@ -467,6 +500,12 @@ def main() -> None:
             with_easyocr=args.docling_with_easyocr,
         )
         records.append(record)
+        emit_progress(
+            "asset_complete",
+            key=entry.key,
+            label=entry.label or entry.key,
+            target_dir=record["target_dir"],
+        )
         print(f"Saved to: {record['target_dir']}")
 
     manifest_path = write_manifest(

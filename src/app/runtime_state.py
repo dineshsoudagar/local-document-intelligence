@@ -10,6 +10,7 @@ from pydantic import BaseModel, Field
 
 
 RuntimeInstallState = Literal["not_ready", "installing", "ready", "failed"]
+SetupProgressState = Literal["pending", "running", "complete", "skipped", "failed"]
 RUNTIME_VERSION = "1"
 
 
@@ -34,12 +35,25 @@ class ManagedAppConfig(BaseModel):
         return self.model_copy(update={"updated_at": utc_now_iso()})
 
 
+class SetupProgressItem(BaseModel):
+    """One progress row displayed in the setup UI."""
+
+    key: str
+    label: str
+    status: SetupProgressState = "pending"
+    progress: int = 0
+    detail: str | None = None
+
+
 class SetupStatus(BaseModel):
     """Persisted installer status shown by the setup UI."""
 
     install_state: RuntimeInstallState = "not_ready"
     current_step: str | None = None
     progress_message: str | None = None
+    overall_progress: int = 0
+    package_progress: int = 0
+    package_message: str | None = None
     last_error: str | None = None
     cancel_requested: bool = False
     is_busy: bool = False
@@ -47,6 +61,7 @@ class SetupStatus(BaseModel):
     selected_embedding_key: str | None = None
     selected_generator_load_preset: str | None = None
     selected_torch_variant: str | None = None
+    model_progress_items: list[SetupProgressItem] = Field(default_factory=list)
     started_at: str | None = None
     completed_at: str | None = None
     updated_at: str = Field(default_factory=utc_now_iso)

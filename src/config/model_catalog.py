@@ -44,6 +44,8 @@ class ArtifactEntry:
 
     key: str
     relative_dir: str
+    label: str | None = None
+    description: str | None = None
 
     def resolve_dir(self, project_root: str | Path, models_root: str) -> Path:
         """Return the resolved local directory for this artifact bundle."""
@@ -139,6 +141,26 @@ class ModelCatalog:
                 description="Instruction-tuned generator optimized for grounded answers.",
                 size_hint="4B",
             ),
+            ModelEntry(
+                key="qwen3_1_7b_instruct",
+                repo_id="Qwen/Qwen3-1.7B-Instruct",
+                relative_dir="generators/qwen3-1.7b-instruct",
+                role="generator",
+                selectable=True,
+                label="Qwen3 1.7B Instruct",
+                description="Mid-tier instruction-tuned generator for grounded local answers.",
+                size_hint="1.7B",
+            ),
+            ModelEntry(
+                key="qwen3_0_6b_instruct",
+                repo_id="Qwen/Qwen3-0.6B-Instruct",
+                relative_dir="generators/qwen3-0.6b-instruct",
+                role="generator",
+                selectable=True,
+                label="Qwen3 0.6B Instruct",
+                description="Low-memory instruction-tuned generator for constrained GPUs.",
+                size_hint="0.6B",
+            ),
         )
     )
 
@@ -147,6 +169,8 @@ class ModelCatalog:
             ArtifactEntry(
                 key="docling_artifacts",
                 relative_dir="docling/artifacts",
+                label="Docling artifacts",
+                description="Offline parsing artifacts used by the local Docling pipeline.",
             ),
         )
     )

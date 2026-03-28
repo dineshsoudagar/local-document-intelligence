@@ -33,9 +33,21 @@ class SetupStartRequest(BaseModel):
 class SetupStatusResponse(BaseModel):
     """Response payload describing current setup progress."""
 
+    class SetupProgressItemResponse(BaseModel):
+        """One setup progress row shown in the frontend."""
+
+        key: str
+        label: str
+        status: str
+        progress: int
+        detail: str | None
+
     install_state: str
     current_step: str | None
     progress_message: str | None
+    overall_progress: int
+    package_progress: int
+    package_message: str | None
     last_error: str | None
     cancel_requested: bool
     is_busy: bool
@@ -43,6 +55,7 @@ class SetupStatusResponse(BaseModel):
     selected_embedding_key: str | None
     selected_generator_load_preset: str | None
     selected_torch_variant: str | None
+    model_progress_items: list[SetupProgressItemResponse]
     started_at: str | None
     completed_at: str | None
     updated_at: str

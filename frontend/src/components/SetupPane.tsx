@@ -2,6 +2,7 @@ import { useEffect, useState } from "react";
 import type {
   GeneratorLoadPreset,
   SetupOptions,
+  SetupProgressItem,
   SetupStatus,
   SetupStartPayload,
   SetupOption,
@@ -74,6 +75,21 @@ function findOptionByKey<T extends { key: string }>(options: T[], key: string | 
 
 function formatSetupOptionLabel(option: SetupOption) {
   return option.size_hint ? `${option.label} · ${option.size_hint}` : option.label;
+}
+
+function formatProgressStateLabel(item: SetupProgressItem) {
+  switch (item.status) {
+    case "running":
+      return "Downloading";
+    case "complete":
+      return "Ready";
+    case "skipped":
+      return "Already local";
+    case "failed":
+      return "Failed";
+    default:
+      return "Pending";
+  }
 }
 
 function SetupSelectField({
@@ -226,6 +242,11 @@ export function SetupPane({
         : options.compute.gpu_name
       : "NVIDIA GPU detected"
     : "CPU-only system";
+  const shouldShowProgress =
+    Boolean(status?.current_step) ||
+    Boolean(status?.model_progress_items.length) ||
+    status?.install_state === "ready" ||
+    status?.install_state === "failed";
 
   return (
     <div className="setup-shell">
@@ -253,6 +274,70 @@ export function SetupPane({
             {status?.progress_message ?? "Choose your runtime and start setup."}
           </span>
         </div>
+
+        {shouldShowProgress && (
+          <div className="setup-progress-board">
+            <div className="setup-progress-card">
+              <div className="setup-progress-heading">
+                <span>Overall setup</span>
+                <strong>{status?.overall_progress ?? 0}%</strong>
+              </div>
+              <div className="setup-progress-track overall">
+                <div
+                  className="setup-progress-fill overall"
+                  style={{ width: `${status?.overall_progress ?? 0}%` }}
+                />
+              </div>
+              <p className="setup-progress-caption">
+                {status?.progress_message ?? "Waiting for setup to start."}
+              </p>
+            </div>
+
+            <div className="setup-progress-card">
+              <div className="setup-progress-heading">
+                <span>Packages and runtime</span>
+                <strong>{status?.package_progress ?? 0}%</strong>
+              </div>
+              <div className="setup-progress-track package">
+                <div
+                  className="setup-progress-fill package"
+                  style={{ width: `${status?.package_progress ?? 0}%` }}
+                />
+              </div>
+              <p className="setup-progress-caption">
+                {status?.package_message ?? "The managed runtime has not started yet."}
+              </p>
+            </div>
+
+            {Boolean(status?.model_progress_items.length) && (
+              <div className="setup-model-progress-list">
+                {status?.model_progress_items.map((item) => (
+                  <div key={item.key} className="setup-model-progress-row">
+                    <div className="setup-model-progress-header">
+                      <span>{item.label}</span>
+                      <span className={`setup-model-progress-state ${item.status}`}>
+                        {formatProgressStateLabel(item)}
+                      </span>
+                    </div>
+                    <div
+                      className={`setup-progress-track item ${
+                        item.status === "running" ? "is-running" : ""
+                      }`}
+                    >
+                      <div
+                        className={`setup-progress-fill item ${item.status}`}
+                        style={{ width: `${item.progress}%` }}
+                      />
+                    </div>
+                    <p className="setup-model-progress-detail">
+                      {item.detail ?? "Waiting for this asset to be processed."}
+                    </p>
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
+        )}
 
         <div className="setup-hardware-strip">
           <div className="setup-hardware-item">
