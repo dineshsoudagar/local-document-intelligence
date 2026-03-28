@@ -18,6 +18,10 @@ dist/
 !frontend/dist/**
 dist-ssr/
 test_venv/
+test_scripts/
+dist_builds/
+build/
+build_builds/
 
 # Files
 *.log

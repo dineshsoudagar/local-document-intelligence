@@ -10,12 +10,13 @@ from docling.datamodel.base_models import InputFormat
 from src.config.index_config import IndexConfig
 from src.config.parser_config import ParserConfig
 from src.indexing.macro_packet_builder import MacroPacketBuilder
-from src.indexing.macro_profiles import MacroPacketBundle
 from src.parser.docling_parser import DoclingParser
 from src.parser.text_chunk import ParsedChunk
 from src.retrieval.qdrant_hybrid_index import QdrantHybridIndex
 from src.utils.io import resolve_pdf_path
-
+from src.config.generator_config import GeneratorConfig
+from src.indexing.macro_profiles import MacroPacketBundle, MacroSummaryBundle
+from src.indexing.macro_summary_service import MacroSummaryService
 
 class IndexService:
     """Manage document ingestion and index lifecycle."""
@@ -27,9 +28,11 @@ class IndexService:
         index_config: IndexConfig | None = None,
         parser_config: ParserConfig | None = None,
         macro_packet_builder: MacroPacketBuilder | None = None,
+        generator_config: GeneratorConfig | None = None,
+        macro_summary_service: MacroSummaryService | None = None,
     ) -> None:
-        self._index = index or QdrantHybridIndex(index_config or IndexConfig())
-        self._parser = DoclingParser(
+        resolved_index_config = index_config or IndexConfig()
+        resolved_parser_config = (
             parser_config
             or ParserConfig(
                 allowed_formats=[InputFormat.PDF],
@@ -37,7 +40,19 @@ class IndexService:
                 include_picture_chunks=True,
             )
         )
+        resolved_generator_config = generator_config or GeneratorConfig(
+            project_root=resolved_index_config.project_root,
+            model_catalog=resolved_index_config.model_catalog,
+            pipeline_models=resolved_index_config.pipeline_models,
+        )
+
+        self._index = index or QdrantHybridIndex(resolved_index_config)
+        self._parser = DoclingParser(
+            resolved_parser_config
+        )
         self._macro_packet_builder = macro_packet_builder or MacroPacketBuilder()
+        self._generator_config = resolved_generator_config
+        self._macro_summary_service = macro_summary_service
 
     @property
     def index(self) -> QdrantHybridIndex:
@@ -120,6 +135,39 @@ class IndexService:
         chunks = self._parse_chunks(path, resolved_doc_id)
         packets = self._macro_packet_builder.build(chunks)
         return resolved_doc_id, chunks, packets
+
+    def build_macro_summaries(
+        self,
+        pdf_path: str | Path,
+        doc_id: str | None = None,
+    ) -> MacroSummaryBundle:
+        """Parse one PDF, build macro packets, and summarize them."""
+        path = resolve_pdf_path(pdf_path)
+        resolved_doc_id = doc_id or self.build_doc_id(path)
+        chunks = self._parse_chunks(path, resolved_doc_id)
+        packets = self._macro_packet_builder.build(chunks)
+        return self._get_macro_summary_service().summarize_document(packets.document)
+
+    def parse_with_macro_summaries(
+        self,
+        pdf_path: str | Path,
+        doc_id: str | None = None,
+    ) -> tuple[str, list[ParsedChunk], MacroPacketBundle, MacroSummaryBundle]:
+        """Parse once and return chunks, packets, and generated macro summaries."""
+        path = resolve_pdf_path(pdf_path)
+        resolved_doc_id = doc_id or self.build_doc_id(path)
+        chunks = self._parse_chunks(path, resolved_doc_id)
+        packets = self._macro_packet_builder.build(chunks)
+        summaries = self._get_macro_summary_service().summarize_document(packets.document)
+        return resolved_doc_id, chunks, packets, summaries
+
+    def _get_macro_summary_service(self) -> MacroSummaryService:
+        """Return the macro summary service, creating it only when needed."""
+        if self._macro_summary_service is None:
+            self._macro_summary_service = MacroSummaryService.from_config(
+                self._generator_config
+            )
+        return self._macro_summary_service
 
     def clear(self) -> None:
         """Clear the entire index."""

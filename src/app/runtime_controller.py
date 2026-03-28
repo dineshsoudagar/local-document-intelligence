@@ -115,6 +115,14 @@ class RuntimeController:
             )
 
         model_catalog = ModelCatalog(models_root="models")
+        generator_config = GeneratorConfig(
+            project_root=self._paths.app_root,
+            model_catalog=model_catalog,
+            pipeline_models=pipeline_models,
+        )
+        preset_key = config.selected_generator_load_preset or "standard"
+        generator_config = generator_config.with_load_preset(preset_key)
+
         index_config = IndexConfig(
             project_root=self._paths.app_root,
             model_catalog=model_catalog,
@@ -132,15 +140,9 @@ class RuntimeController:
         index_service = IndexService(
             index_config=index_config,
             parser_config=parser_config,
+            generator_config=generator_config,
         )
 
-        generator_config = GeneratorConfig(
-            project_root=self._paths.app_root,
-            model_catalog=model_catalog,
-            pipeline_models=pipeline_models,
-        )
-        preset_key = config.selected_generator_load_preset or "standard"
-        generator_config = generator_config.with_load_preset(preset_key)
         generator = LocalQwenGenerator(generator_config.generator_model_path, config=generator_config)
         answer_service = GroundedAnswerService(
             index=index_service.index,

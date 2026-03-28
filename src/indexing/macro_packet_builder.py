@@ -1,11 +1,12 @@
-"""Build minimal macro packets from parsed chunks before summary generation."""
+"""Build macro packets from parsed chunks before summary generation."""
 
 from __future__ import annotations
 
+import re
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Iterable, Sequence
-import re
+from typing import Sequence
+
 from src.indexing.macro_profiles import (
     DocumentMacroPacket,
     HeadingPath,
@@ -20,26 +21,6 @@ from src.parser.text_chunk import ParsedChunk
 def _clean_text(value: str | None) -> str:
     """Normalize optional text into a stripped string."""
     return str(value or "").strip()
-
-
-def _dedupe_keep_order(values: Iterable[str]) -> tuple[str, ...]:
-    """Remove empty or duplicate strings while preserving order."""
-    result: list[str] = []
-    seen: set[str] = set()
-
-    for value in values:
-        cleaned = _clean_text(value)
-        if not cleaned:
-            continue
-
-        key = cleaned.casefold()
-        if key in seen:
-            continue
-
-        seen.add(key)
-        result.append(cleaned)
-
-    return tuple(result)
 
 
 def _merge_page_start(left: int | None, right: int | None) -> int | None:
@@ -70,7 +51,7 @@ def _extract_heading_path(chunk: ParsedChunk) -> HeadingPath:
 
 @dataclass(slots=True)
 class _SectionAccumulator:
-    """Mutable builder-only grouping state for one section."""
+    """Mutable grouping state for one section."""
 
     doc_id: str
     source_file: str
@@ -80,20 +61,17 @@ class _SectionAccumulator:
     chunks: list[ParsedChunk] = field(default_factory=list)
 
     def add_chunk(self, chunk: ParsedChunk) -> None:
-        """Absorb one parsed chunk into the section group."""
+        """Absorb one parsed chunk."""
         self.chunks.append(chunk)
         self.page_start = _merge_page_start(self.page_start, chunk.page_start)
         self.page_end = _merge_page_end(self.page_end, chunk.page_end)
 
 
 class MacroPacketBuilder:
-    """Convert parsed chunks into minimal document and section macro packets."""
-
-    def __init__(self, *, max_section_chars: int = 4000) -> None:
-        self._max_section_chars = max_section_chars
+    """Convert parsed chunks into full-text section packets."""
 
     def build(self, chunks: Sequence[ParsedChunk]) -> MacroPacketBundle:
-        """Build one document packet and all section packets for a single document."""
+        """Build document and section packets for one parsed document."""
         normalized_chunks = [chunk for chunk in chunks if chunk.text.strip()]
         if not normalized_chunks:
             raise ValueError("Cannot build macro packets from empty chunks")
@@ -133,31 +111,28 @@ class MacroPacketBuilder:
         return next(iter(source_files))
 
     def _group_sections(self, chunks: Sequence[ParsedChunk]) -> list[_SectionAccumulator]:
-        """Group chunks by full heading path in first-seen document order."""
+        """Group chunks by heading path in first-seen order."""
         grouped: dict[HeadingPath, _SectionAccumulator] = {}
 
         for chunk in chunks:
             heading_path = _extract_heading_path(chunk)
-
             if heading_path not in grouped:
                 grouped[heading_path] = _SectionAccumulator(
                     doc_id=chunk.doc_id,
                     source_file=chunk.source_file,
                     heading_path=heading_path,
                 )
-
             grouped[heading_path].add_chunk(chunk)
 
         return list(grouped.values())
 
     def _build_section_packet(self, accumulator: _SectionAccumulator) -> SectionMacroPacket:
-        """Convert one grouped section accumulator into a minimal section packet."""
+        """Convert one grouped section accumulator into a packet."""
         heading_parts = [
             value
             for value in accumulator.heading_path
             if value and value != UNLABELED_SECTION_TOKEN
         ]
-
         section_heading = heading_parts[-1] if heading_parts else "Untitled Section"
 
         return SectionMacroPacket(
@@ -167,15 +142,20 @@ class MacroPacketBuilder:
             section_heading=section_heading,
             page_start=accumulator.page_start,
             page_end=accumulator.page_end,
-            section_text=self._build_section_text(accumulator),
+            section_text=self._build_section_text(accumulator.heading_path, accumulator.chunks),
         )
-    def _build_section_text(self, accumulator: _SectionAccumulator) -> str:
-        """Build bounded plain text for one section."""
+
+    def _build_section_text(
+        self,
+        heading_path: HeadingPath,
+        chunks: Sequence[ParsedChunk],
+    ) -> str:
+        """Merge full section text without truncation."""
         parts: list[str] = []
         seen: set[str] = set()
 
-        for chunk in accumulator.chunks:
-            text = self._normalize_chunk_text(chunk.text, accumulator.heading_path)
+        for chunk in chunks:
+            text = self._normalize_chunk_text(chunk.text, heading_path)
             if not text:
                 continue
 
@@ -186,27 +166,20 @@ class MacroPacketBuilder:
             seen.add(key)
             parts.append(text)
 
-        combined = "\n\n".join(parts).strip()
-
-        if len(combined) <= self._max_section_chars:
-            return combined
-
-        return combined[: self._max_section_chars].rstrip() + "..."
+        return "\n\n".join(parts).strip()
 
     def _normalize_chunk_text(self, text: str, heading_path: HeadingPath) -> str:
-        """Normalize chunk text and remove repeated heading prefixes."""
+        """Normalize text and strip repeated heading prefixes."""
         normalized = " ".join(text.split()).strip()
         if not normalized:
             return ""
 
         cleaned = self._strip_heading_prefixes(normalized, heading_path)
-        cleaned = " ".join(cleaned.split()).strip()
-        return cleaned
+        return " ".join(cleaned.split()).strip()
 
     def _strip_heading_prefixes(self, text: str, heading_path: HeadingPath) -> str:
-        """Remove heading strings repeated at the front of contextualized chunk text."""
+        """Remove repeated heading strings at the start of contextualized text."""
         cleaned = text
-
         candidates = sorted(
             [
                 heading.strip()
@@ -220,6 +193,7 @@ class MacroPacketBuilder:
         changed = True
         while changed and cleaned:
             changed = False
+
             for heading in candidates:
                 if not heading:
                     continue
@@ -248,7 +222,7 @@ class MacroPacketBuilder:
         chunks: Sequence[ParsedChunk],
         section_packets: Sequence[SectionMacroPacket],
     ) -> DocumentMacroPacket:
-        """Build the minimal document packet from raw chunks and section packets."""
+        """Build document packet from raw chunks and grouped sections."""
         max_page = 0
 
         for chunk in chunks:

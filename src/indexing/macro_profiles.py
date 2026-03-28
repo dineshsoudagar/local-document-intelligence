@@ -1,4 +1,4 @@
-"""Domain models for minimal document and section macro summaries."""
+"""Domain models for macro packets and macro summaries."""
 
 from __future__ import annotations
 
@@ -80,12 +80,12 @@ def build_section_id(doc_id: str, heading_path: Iterable[str] | None) -> str:
 
 @dataclass(slots=True)
 class SectionMacroPacket:
-    """Minimal pre-summary structured input for one section."""
+    """Transient pre-summary input for one section."""
 
     doc_id: str
     source_file: str
     heading_path: HeadingPath
-    section_heading: str = ""
+    section_heading: str
     page_start: int | None = None
     page_end: int | None = None
     section_text: str = ""
@@ -102,13 +102,21 @@ class SectionMacroPacket:
 
     @property
     def section_id(self) -> str:
+        """Return the stable section identifier."""
         return build_section_id(self.doc_id, self.heading_path)
 
+    @property
+    def display_heading(self) -> str:
+        """Return a readable heading path."""
+        return self.section_heading or " > ".join(self.heading_path)
+
     def to_prompt_payload(self) -> dict[str, Any]:
+        """Return the prompt payload for section summarization."""
         return {
             "section_id": self.section_id,
             "doc_id": self.doc_id,
             "source_file": self.source_file,
+            "heading_path": list(self.heading_path),
             "section_heading": self.section_heading,
             "page_start": self.page_start,
             "page_end": self.page_end,
@@ -118,7 +126,7 @@ class SectionMacroPacket:
 
 @dataclass(slots=True)
 class DocumentMacroPacket:
-    """Minimal pre-summary structured input for the whole document."""
+    """Transient pre-summary input for the whole document."""
 
     doc_id: str
     source_file: str
@@ -141,7 +149,7 @@ class DocumentMacroPacket:
         return tuple(packet.heading_path for packet in self.section_packets)
 
     def to_prompt_payload(self) -> dict[str, Any]:
-        """Return a minimal document-level summary prompt payload."""
+        """Return the prompt payload for document summarization."""
         return {
             "doc_id": self.doc_id,
             "source_file": self.source_file,
@@ -154,12 +162,12 @@ class DocumentMacroPacket:
 
 @dataclass(slots=True, frozen=True)
 class SectionMacroProfile:
-    """Final persisted minimal summary for one section."""
+    """Persisted minimal summary for one section."""
 
     section_id: str
     doc_id: str
     source_file: str
-    document_heading: str | None
+    heading_path: HeadingPath
     section_heading: str
     page_start: int | None
     page_end: int | None
@@ -171,7 +179,7 @@ class SectionMacroProfile:
         object.__setattr__(self, "section_id", _clean_text(self.section_id))
         object.__setattr__(self, "doc_id", _clean_text(self.doc_id))
         object.__setattr__(self, "source_file", _clean_text(self.source_file))
-        object.__setattr__(self, "document_heading", _normalize_optional_text(self.document_heading))
+        object.__setattr__(self, "heading_path", normalize_heading_path(self.heading_path))
         object.__setattr__(self, "section_heading", _clean_text(self.section_heading))
         object.__setattr__(self, "page_start", page_start)
         object.__setattr__(self, "page_end", page_end)
@@ -181,7 +189,7 @@ class SectionMacroProfile:
 
 @dataclass(slots=True, frozen=True)
 class DocumentMacroProfile:
-    """Final persisted minimal summary for one document."""
+    """Persisted minimal summary for one document."""
 
     doc_id: str
     source_file: str
@@ -207,6 +215,17 @@ class MacroPacketBundle:
 
     document: DocumentMacroPacket
     sections: tuple[SectionMacroPacket, ...] = field(default_factory=tuple)
+
+    def __post_init__(self) -> None:
+        object.__setattr__(self, "sections", tuple(self.sections))
+
+
+@dataclass(slots=True, frozen=True)
+class MacroSummaryBundle:
+    """Final summarized macro output for one document."""
+
+    document: DocumentMacroProfile
+    sections: tuple[SectionMacroProfile, ...] = field(default_factory=tuple)
 
     def __post_init__(self) -> None:
         object.__setattr__(self, "sections", tuple(self.sections))

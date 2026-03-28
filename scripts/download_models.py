@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import argparse
+import importlib.util
 import json
 import os
 import shutil
@@ -12,11 +13,38 @@ from typing import Any, Iterable
 
 from huggingface_hub import snapshot_download
 
-from src.config.model_catalog import (
-    ArtifactEntry,
-    ModelCatalog,
-    ModelEntry,
-    default_pipeline_models,
+CODE_ROOT_ENV_VAR = "LDI_CODE_ROOT"
+
+
+def _resolve_payload_root() -> Path:
+    """Return the bundled code root used to resolve packaged source files."""
+    configured = os.getenv(CODE_ROOT_ENV_VAR)
+    if configured:
+        return Path(configured).expanduser().resolve()
+    return Path(__file__).resolve().parents[1]
+
+
+def _load_model_catalog_symbols() -> tuple[type[Any], type[Any], type[Any], Any]:
+    """Load the bundled model catalog module without adding the payload root to sys.path."""
+    payload_root = _resolve_payload_root()
+    module_path = payload_root / "src" / "config" / "model_catalog.py"
+    spec = importlib.util.spec_from_file_location("_ldi_model_catalog", module_path)
+    if spec is None or spec.loader is None:
+        raise RuntimeError(f"Unable to load model catalog module from {module_path}")
+
+    module = importlib.util.module_from_spec(spec)
+    sys.modules[spec.name] = module
+    spec.loader.exec_module(module)
+    return (
+        module.ArtifactEntry,
+        module.ModelCatalog,
+        module.ModelEntry,
+        module.default_pipeline_models,
+    )
+
+
+ArtifactEntry, ModelCatalog, ModelEntry, default_pipeline_models = (
+    _load_model_catalog_symbols()
 )
 
 

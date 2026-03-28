@@ -14,8 +14,12 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
-from src.app.paths import AppPaths
-from src.app.python_runtime import python_executable_is_usable
+from src.app.paths import CODE_ROOT_ENV_VAR, AppPaths
+from src.app.python_runtime import (
+    hidden_windows_subprocess_kwargs,
+    python_executable_is_usable,
+    sanitized_subprocess_env,
+)
 from src.app.runtime_controller import RuntimeController
 from src.app.runtime_state import (
     ManagedAppConfig,
@@ -588,22 +592,29 @@ class SetupService:
             defaults.docling_artifacts_key,
         ]
         deduped_keys = [key for key in dict.fromkeys(only_keys) if key]
+        staged_script = self._stage_setup_script(self._paths.download_models_script_path)
         args = [
             str(managed_python),
-            str(self._paths.download_models_script_path),
+            str(staged_script),
             "--project-root",
             str(self._paths.app_root),
             "--only",
             *deduped_keys,
         ]
-        env = os.environ.copy()
-        env["PYTHONPATH"] = str(self._paths.code_root)
         self._run_process(
             args,
-            cwd=self._paths.code_root,
-            env=env,
+            cwd=self._paths.app_root,
+            env={CODE_ROOT_ENV_VAR: str(self._paths.code_root)},
             line_callback=self._handle_download_progress_line,
         )
+
+    def _stage_setup_script(self, source_path: Path) -> Path:
+        """Copy one packaged setup script to a neutral runtime directory before execution."""
+        staged_dir = self._paths.runtime_dir / "setup-scripts"
+        staged_dir.mkdir(parents=True, exist_ok=True)
+        staged_path = staged_dir / source_path.name
+        shutil.copyfile(source_path, staged_path)
+        return staged_path
 
     def _run_process(
         self,
@@ -614,11 +625,7 @@ class SetupService:
         line_callback: Callable[[str], None] | None = None,
     ) -> None:
         """Run one subprocess while supporting cancellation and setup logging."""
-        process_env = os.environ.copy()
-        process_env.pop("PYTHONPATH", None)
-        process_env.pop("PYTHONHOME", None)
-        if env is not None:
-            process_env.update(env)
+        process_env = sanitized_subprocess_env(env)
 
         self._paths.logs_dir.mkdir(parents=True, exist_ok=True)
         with self._log_path.open("a", encoding="utf-8") as log_file:
@@ -637,6 +644,7 @@ class SetupService:
                 stderr=stderr_target,
                 text=True,
                 bufsize=1,
+                **hidden_windows_subprocess_kwargs(),
             )
             with self._lock:
                 self._active_process = process
@@ -781,6 +789,7 @@ class SetupService:
                 text=True,
                 check=False,
                 timeout=5,
+                **hidden_windows_subprocess_kwargs(),
             )
             if result.returncode == 0:
                 lines = [line.strip() for line in result.stdout.splitlines() if line.strip()]
