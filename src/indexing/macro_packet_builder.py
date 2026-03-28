@@ -5,7 +5,7 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Iterable, Sequence
-
+import re
 from src.indexing.macro_profiles import (
     DocumentMacroPacket,
     HeadingPath,
@@ -277,9 +277,17 @@ class MacroPacketBuilder:
         source_file: str,
         section_packets: Sequence[SectionMacroPacket],
     ) -> str:
-        """Infer a document title cheaply."""
+        """Infer a document title conservatively."""
+        structural_heading_pattern = re.compile(
+            r"^((?:[IVXLC]+)\.|(?:[A-Z])\.|(?:\d+(?:\.\d+)*)\.?)\s+"
+        )
+
         for packet in section_packets:
-            if packet.document_heading:
-                return packet.document_heading
+            heading = packet.section_heading.strip()
+            if not heading or heading == "Untitled Section":
+                continue
+
+            if packet.page_start == 1 and not structural_heading_pattern.match(heading):
+                return heading
 
         return Path(source_file).stem.replace("_", " ").replace("-", " ").strip()

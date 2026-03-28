@@ -1639,3 +1639,352 @@ body[data-theme="dark"] .setup-select-input {
   border-color: #bfdbfe;
   background: linear-gradient(180deg, #ffffff 0%, #f3f8ff 100%);
 }
+
+/* Two-step bootstrap setup overrides */
+
+.setup-shell {
+  min-height: 100vh;
+  height: auto;
+  gap: 14px;
+  padding: 16px;
+  overflow: auto;
+}
+
+.setup-hero,
+.setup-panel,
+.setup-review-panel,
+.setup-footer-panel,
+.setup-progress-card {
+  border: 1px solid #cfe0f5;
+  border-radius: 18px;
+  background: rgba(255, 255, 255, 0.94);
+  box-shadow: 0 10px 22px rgba(15, 23, 42, 0.07);
+  backdrop-filter: blur(12px);
+}
+
+.setup-hero {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  padding: 18px 20px;
+}
+
+.setup-hero-top {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 18px;
+}
+
+.setup-hero-copy {
+  min-width: 0;
+}
+
+.setup-hero h1 {
+  max-width: 760px;
+}
+
+.setup-copy {
+  margin: 10px 0 0;
+}
+
+.setup-stepper {
+  display: grid;
+  gap: 8px;
+  min-width: 280px;
+}
+
+.setup-step {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 10px 12px;
+  border: 1px solid rgba(191, 219, 254, 0.9);
+  border-radius: 14px;
+  background: linear-gradient(180deg, rgba(255, 255, 255, 0.96) 0%, rgba(244, 249, 255, 0.94) 100%);
+  color: #5f7690;
+}
+
+.setup-step.is-active {
+  border-color: #93c5fd;
+  background: linear-gradient(135deg, rgba(219, 234, 254, 0.88) 0%, rgba(239, 246, 255, 0.96) 100%);
+  color: #16324f;
+}
+
+.setup-step.is-complete {
+  border-color: rgba(147, 197, 253, 0.6);
+  color: #36506c;
+}
+
+.setup-step-index {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 26px;
+  height: 26px;
+  border-radius: 999px;
+  background: rgba(37, 99, 235, 0.1);
+  color: #2563eb;
+  font-size: 12px;
+  font-weight: 800;
+}
+
+.setup-step.is-active .setup-step-index {
+  background: linear-gradient(135deg, #2563eb 0%, #38bdf8 100%);
+  color: #eff6ff;
+}
+
+.setup-step-text {
+  font-size: 12px;
+  font-weight: 700;
+  line-height: 1.35;
+}
+
+.setup-status-banner {
+  margin-top: 0;
+}
+
+.setup-hardware-strip {
+  margin-top: 0;
+}
+
+.setup-grid {
+  gap: 12px;
+}
+
+.setup-panel {
+  padding: 14px;
+  gap: 10px;
+}
+
+.setup-review-panel {
+  padding: 16px 18px;
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+}
+
+.setup-review-header h2,
+.setup-footer-copy h2 {
+  margin: 0 0 4px;
+  font-size: 1rem;
+  color: #16324f;
+}
+
+.setup-review-header p,
+.setup-footer-copy p {
+  margin: 0;
+  font-size: 13px;
+  line-height: 1.45;
+  color: #4f6782;
+}
+
+.setup-review-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 12px;
+}
+
+.setup-review-card {
+  padding: 12px 14px;
+  border: 1px solid rgba(191, 219, 254, 0.48);
+  border-radius: 14px;
+  background: linear-gradient(180deg, rgba(255, 255, 255, 0.98) 0%, rgba(245, 250, 255, 0.96) 100%);
+}
+
+.setup-review-label {
+  display: block;
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: #64748b;
+}
+
+.setup-review-value {
+  display: block;
+  margin-top: 4px;
+  color: #16324f;
+  line-height: 1.35;
+}
+
+.setup-review-detail {
+  margin: 8px 0 0;
+  font-size: 12px;
+  line-height: 1.4;
+  color: #5f7690;
+}
+
+.setup-progress-panel {
+  display: grid;
+  gap: 10px;
+}
+
+.setup-progress-card {
+  padding: 12px 14px;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.setup-progress-row {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.setup-progress-activity {
+  margin: 0;
+  min-width: 0;
+  flex: 1;
+  color: #16324f;
+  font-size: 13px;
+  font-weight: 700;
+  line-height: 1.35;
+}
+
+.setup-progress-meta {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-shrink: 0;
+}
+
+.setup-progress-tag {
+  display: inline-flex;
+  align-items: center;
+  padding: 4px 8px;
+  border-radius: 999px;
+  background: rgba(37, 99, 235, 0.1);
+  color: #2563eb;
+  font-size: 10px;
+  font-weight: 800;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+}
+
+.setup-progress-percent {
+  color: #2563eb;
+  font-size: 12px;
+  font-weight: 800;
+  letter-spacing: 0.02em;
+}
+
+.setup-progress-track {
+  height: 10px;
+}
+
+.setup-progress-track.item {
+  height: 10px;
+}
+
+.setup-footer-panel {
+  padding: 14px 18px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 14px;
+  background:
+    radial-gradient(circle at right center, rgba(224, 242, 254, 0.52) 0%, transparent 24%),
+    linear-gradient(135deg, rgba(255, 255, 255, 0.98) 0%, rgba(243, 249, 255, 0.95) 100%);
+}
+
+.setup-actions {
+  flex-shrink: 0;
+}
+
+@media (max-width: 960px) {
+  .setup-shell {
+    min-height: 100vh;
+  }
+
+  .setup-hero-top,
+  .setup-footer-panel {
+    flex-direction: column;
+    align-items: stretch;
+  }
+
+  .setup-stepper {
+    min-width: 0;
+  }
+
+  .setup-review-grid,
+  .setup-grid,
+  .setup-hardware-strip {
+    grid-template-columns: 1fr;
+  }
+}
+
+@media (max-height: 920px) {
+  .setup-shell {
+    gap: 12px;
+    padding: 14px;
+  }
+
+  .setup-hero,
+  .setup-review-panel,
+  .setup-footer-panel {
+    padding: 14px 16px;
+  }
+
+  .setup-step {
+    padding: 8px 10px;
+  }
+
+  .setup-review-header p,
+  .setup-footer-copy p,
+  .setup-review-detail,
+  .setup-progress-activity {
+    font-size: 12px;
+  }
+}
+
+body[data-theme="dark"] .setup-hero,
+body[data-theme="dark"] .setup-panel,
+body[data-theme="dark"] .setup-review-panel,
+body[data-theme="dark"] .setup-footer-panel,
+body[data-theme="dark"] .setup-progress-card {
+  border-color: #cfe0f5;
+  background: rgba(255, 255, 255, 0.94);
+  box-shadow: 0 12px 28px rgba(15, 23, 42, 0.08);
+}
+
+body[data-theme="dark"] .setup-step {
+  border-color: rgba(191, 219, 254, 0.9);
+  background: linear-gradient(180deg, rgba(255, 255, 255, 0.96) 0%, rgba(244, 249, 255, 0.94) 100%);
+  color: #5f7690;
+}
+
+body[data-theme="dark"] .setup-step.is-active {
+  border-color: #93c5fd;
+  background: linear-gradient(135deg, rgba(219, 234, 254, 0.88) 0%, rgba(239, 246, 255, 0.96) 100%);
+  color: #16324f;
+}
+
+body[data-theme="dark"] .setup-review-card {
+  border-color: rgba(191, 219, 254, 0.38);
+  background: linear-gradient(180deg, rgba(255, 255, 255, 0.98) 0%, rgba(243, 249, 255, 0.95) 100%);
+}
+
+body[data-theme="dark"] .setup-review-label,
+body[data-theme="dark"] .setup-review-detail,
+body[data-theme="dark"] .setup-review-header p,
+body[data-theme="dark"] .setup-footer-copy p,
+body[data-theme="dark"] .setup-step,
+body[data-theme="dark"] .setup-progress-activity {
+  color: #5f7690;
+}
+
+body[data-theme="dark"] .setup-review-value,
+body[data-theme="dark"] .setup-review-header h2,
+body[data-theme="dark"] .setup-footer-copy h2,
+body[data-theme="dark"] .setup-progress-percent,
+body[data-theme="dark"] .setup-progress-activity {
+  color: #16324f;
+}
+
+body[data-theme="dark"] .setup-progress-tag {
+  background: rgba(37, 99, 235, 0.1);
+  color: #2563eb;
+}

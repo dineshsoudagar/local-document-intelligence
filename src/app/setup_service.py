@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 import os
+import shutil
 import subprocess
 import sys
 import threading
@@ -14,6 +15,7 @@ from pathlib import Path
 from typing import Any
 
 from src.app.paths import AppPaths
+from src.app.python_runtime import python_executable_is_usable
 from src.app.runtime_controller import RuntimeController
 from src.app.runtime_state import (
     ManagedAppConfig,
@@ -439,19 +441,7 @@ class SetupService:
             self._check_cancel_requested()
 
             bootstrap_python = self._resolve_bootstrap_python()
-            managed_python = self._paths.managed_venv_dir / "Scripts" / "python.exe"
-
-            if not managed_python.is_file():
-                self._write_status(
-                    current_step="create_venv",
-                    progress_message="Creating managed virtual environment...",
-                    package_progress=18,
-                    package_message="Creating the managed Python environment...",
-                )
-                self._run_process(
-                    [str(bootstrap_python), "-m", "venv", str(self._paths.managed_venv_dir)],
-                    cwd=self._paths.code_root,
-                )
+            managed_python = self._ensure_managed_python(bootstrap_python)
             self._check_cancel_requested()
 
             self._write_status(
@@ -712,6 +702,49 @@ class SetupService:
                 "falling back to the launcher executable."
             )
         return Path(sys.executable).resolve()
+
+    def _append_log_line(self, message: str) -> None:
+        """Append one diagnostic line to the setup log."""
+        self._paths.logs_dir.mkdir(parents=True, exist_ok=True)
+        with self._log_path.open("a", encoding="utf-8") as log_file:
+            log_file.write(f"[{utc_now_iso()}] {message}\n")
+
+    def _ensure_managed_python(self, bootstrap_python: Path) -> Path:
+        """Return a usable managed venv Python, recreating the venv if needed."""
+        managed_python = self._paths.managed_venv_dir / "Scripts" / "python.exe"
+        usable, detail = python_executable_is_usable(managed_python)
+        if usable:
+            return managed_python
+
+        if self._paths.managed_venv_dir.exists():
+            detail_suffix = f" Reason: {detail}" if detail else ""
+            self._append_log_line(
+                f"Removing unusable managed virtual environment at "
+                f"{self._paths.managed_venv_dir}.{detail_suffix}"
+            )
+            shutil.rmtree(self._paths.managed_venv_dir)
+
+        self._write_status(
+            current_step="create_venv",
+            progress_message="Creating managed virtual environment...",
+            package_progress=18,
+            package_message="Creating the managed Python environment...",
+        )
+        self._run_process(
+            [str(bootstrap_python), "-m", "venv", str(self._paths.managed_venv_dir)],
+            cwd=self._paths.code_root,
+        )
+
+        recreated_python = self._paths.managed_venv_dir / "Scripts" / "python.exe"
+        usable, detail = python_executable_is_usable(recreated_python)
+        if usable:
+            return recreated_python
+
+        detail_suffix = f": {detail}" if detail else ""
+        raise RuntimeError(
+            f"Managed Python runtime is unusable after virtual environment creation"
+            f"{detail_suffix}"
+        )
 
     def _write_status(self, **updates: object) -> SetupStatus:
         """Persist one status update."""

@@ -11,6 +11,7 @@ export default defineConfig({
     proxy: {
       '/documents': 'http://localhost:8000',
       '/query': 'http://localhost:8000',
+      '/setup': 'http://localhost:8000',
       '/health': 'http://localhost:8000',
       '/healthz': 'http://localhost:8000',
     },

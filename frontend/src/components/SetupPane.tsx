@@ -17,13 +17,24 @@ type SetupPaneProps = {
   onCancel: () => Promise<void>;
 };
 
+type SetupStep = "configure" | "review";
+
+type CurrentProgress = {
+  activity: string;
+  progress: number;
+  stateClass: string;
+  stateLabel: string;
+  variant: "package" | "item";
+};
+
 function generatorRuntimeGuide(
   preset: GeneratorLoadPreset,
   options: SetupOptions | null,
 ): { vramRange: string; recommendation: string } {
   const gpuName = options?.compute.gpu_name;
   const gpuMemory = options?.compute.gpu_memory_gb;
-  const isRecommended = options?.compute.recommended_generator_load_preset === preset.key;
+  const isRecommended =
+    options?.compute.recommended_generator_load_preset === preset.key;
   const detectedGpu = gpuName
     ? gpuMemory
       ? `${gpuName} with ${gpuMemory} GB VRAM`
@@ -55,7 +66,8 @@ function generatorRuntimeGuide(
     case "cpu_safe":
       return {
         vramRange: "GPU VRAM not required",
-        recommendation: "Use this when CUDA is unavailable or the GPU is too small.",
+        recommendation:
+          "Use this when CUDA is unavailable or the GPU is too small.",
       };
     default:
       return {
@@ -65,7 +77,10 @@ function generatorRuntimeGuide(
   }
 }
 
-function findOptionByKey<T extends { key: string }>(options: T[], key: string | null | undefined) {
+function findOptionByKey<T extends { key: string }>(
+  options: T[],
+  key: string | null | undefined,
+) {
   if (!key) {
     return null;
   }
@@ -92,7 +107,37 @@ function formatProgressStateLabel(item: SetupProgressItem) {
   }
 }
 
-function buildCurrentProgress(status: SetupStatus | null) {
+function hasSetupHistory(status: SetupStatus | null) {
+  if (!status || status.current_step === "cancelled") {
+    return false;
+  }
+
+  if (status.current_step) {
+    return true;
+  }
+
+  return status.model_progress_items.some(
+    (item) => item.status !== "pending" || item.progress > 0,
+  );
+}
+
+function shouldOpenReviewStep(status: SetupStatus | null) {
+  if (!status) {
+    return false;
+  }
+
+  if (
+    status.install_state === "installing" ||
+    status.install_state === "failed" ||
+    status.install_state === "ready"
+  ) {
+    return true;
+  }
+
+  return hasSetupHistory(status);
+}
+
+function buildCurrentProgress(status: SetupStatus | null): CurrentProgress | null {
   if (!status) {
     return null;
   }
@@ -102,25 +147,27 @@ function buildCurrentProgress(status: SetupStatus | null) {
     const activeItem =
       items.find((item) => item.status === "running") ??
       items.find((item) => item.status === "pending") ??
-      items.find((item) => item.status === "complete" || item.status === "skipped") ??
+      items.find(
+        (item) => item.status === "complete" || item.status === "skipped",
+      ) ??
       items[0];
 
     const completedCount = items.filter(
       (item) => item.status === "complete" || item.status === "skipped",
     ).length;
     const ordinal =
-      activeItem.status === "pending" ? Math.min(completedCount + 1, items.length) : completedCount;
+      activeItem.status === "pending"
+        ? Math.min(completedCount + 1, items.length)
+        : Math.max(completedCount, 1);
+    const prefix =
+      items.length > 1
+        ? `Download ${ordinal} of ${items.length}`
+        : "Model download";
 
     return {
-      variant: "item" as const,
-      title: `Current download${items.length > 1 ? ` · ${Math.max(ordinal, 1)} of ${items.length}` : ""}`,
-      label: activeItem.label,
+      variant: "item",
+      activity: `${prefix}: ${activeItem.label}`,
       progress: activeItem.progress,
-      detail:
-        activeItem.detail ??
-        (activeItem.status === "pending"
-          ? "Queued to download next."
-          : "Downloading this asset into the local models directory."),
       stateClass: activeItem.status,
       stateLabel: formatProgressStateLabel(activeItem),
     };
@@ -134,11 +181,12 @@ function buildCurrentProgress(status: SetupStatus | null) {
         : "running";
 
   return {
-    variant: "package" as const,
-    title: "Current progress",
-    label: "Packages and runtime",
+    variant: "package",
+    activity:
+      status.package_message ??
+      status.progress_message ??
+      "Waiting for setup to start.",
     progress: status.package_progress ?? 0,
-    detail: status.package_message ?? status.progress_message ?? "Waiting for setup to start.",
     stateClass: packageState,
     stateLabel:
       packageState === "failed"
@@ -193,6 +241,7 @@ export function SetupPane({
   const [embeddingKey, setEmbeddingKey] = useState<string>("");
   const [generatorLoadPreset, setGeneratorLoadPreset] = useState<string>("");
   const [torchVariant, setTorchVariant] = useState<string>("");
+  const [setupStep, setSetupStep] = useState<SetupStep>("configure");
   const [submitError, setSubmitError] = useState<string | null>(null);
   const [isSubmitting, setIsSubmitting] = useState(false);
 
@@ -202,21 +251,30 @@ export function SetupPane({
     }
 
     setGeneratorKey((current) => {
-      if (current && options.generator_models.some((option) => option.key === current)) {
+      if (
+        current &&
+        options.generator_models.some((option) => option.key === current)
+      ) {
         return current;
       }
       return status?.selected_generator_key ?? options.generator_models[0]?.key ?? "";
     });
 
     setEmbeddingKey((current) => {
-      if (current && options.embedding_models.some((option) => option.key === current)) {
+      if (
+        current &&
+        options.embedding_models.some((option) => option.key === current)
+      ) {
         return current;
       }
       return status?.selected_embedding_key ?? options.embedding_models[0]?.key ?? "";
     });
 
     setGeneratorLoadPreset((current) => {
-      if (current && options.generator_load_presets.some((option) => option.key === current)) {
+      if (
+        current &&
+        options.generator_load_presets.some((option) => option.key === current)
+      ) {
         return current;
       }
       return (
@@ -228,7 +286,10 @@ export function SetupPane({
     });
 
     setTorchVariant((current) => {
-      if (current && options.torch_variants.some((option) => option.key === current)) {
+      if (
+        current &&
+        options.torch_variants.some((option) => option.key === current)
+      ) {
         return current;
       }
       return (
@@ -240,9 +301,48 @@ export function SetupPane({
     });
   }, [options, status]);
 
-  async function handleStart() {
+  useEffect(() => {
+    if (!status) {
+      return;
+    }
+
+    if (status.current_step === "cancelled") {
+      setSetupStep("configure");
+      return;
+    }
+
+    if (shouldOpenReviewStep(status)) {
+      setSetupStep("review");
+    }
+  }, [status]);
+
+  function validateSelections() {
     if (!generatorKey || !embeddingKey || !generatorLoadPreset || !torchVariant) {
-      setSubmitError("Select a generator, embedder, runtime preset, and torch variant.");
+      setSubmitError(
+        "Select a generator, embedder, runtime preset, and torch variant.",
+      );
+      return false;
+    }
+
+    return true;
+  }
+
+  function handleNext() {
+    if (!validateSelections()) {
+      return;
+    }
+
+    setSubmitError(null);
+    setSetupStep("review");
+  }
+
+  function handleBack() {
+    setSubmitError(null);
+    setSetupStep("configure");
+  }
+
+  async function handleStart() {
+    if (!validateSelections()) {
       return;
     }
 
@@ -287,11 +387,25 @@ export function SetupPane({
   }
 
   const isBusy = status?.is_busy ?? false;
-  const generatorSelection = findOptionByKey(options?.generator_models ?? [], generatorKey);
-  const embeddingSelection = findOptionByKey(options?.embedding_models ?? [], embeddingKey);
-  const presetSelection = findOptionByKey(options?.generator_load_presets ?? [], generatorLoadPreset);
-  const torchSelection = findOptionByKey(options?.torch_variants ?? [], torchVariant);
-  const presetGuide = presetSelection ? generatorRuntimeGuide(presetSelection, options) : null;
+  const generatorSelection = findOptionByKey(
+    options?.generator_models ?? [],
+    generatorKey,
+  );
+  const embeddingSelection = findOptionByKey(
+    options?.embedding_models ?? [],
+    embeddingKey,
+  );
+  const presetSelection = findOptionByKey(
+    options?.generator_load_presets ?? [],
+    generatorLoadPreset,
+  );
+  const torchSelection = findOptionByKey(
+    options?.torch_variants ?? [],
+    torchVariant,
+  );
+  const presetGuide = presetSelection
+    ? generatorRuntimeGuide(presetSelection, options)
+    : null;
   const detectedGpuLabel = options?.compute.cuda_available
     ? options.compute.gpu_name
       ? options.compute.gpu_memory_gb
@@ -299,69 +413,321 @@ export function SetupPane({
         : options.compute.gpu_name
       : "NVIDIA GPU detected"
     : "CPU-only system";
-  const shouldShowProgress =
-    Boolean(status?.current_step) ||
-    Boolean(status?.model_progress_items.length) ||
-    status?.install_state === "ready" ||
-    status?.install_state === "failed";
+  const isSelectionSyncedWithStatus = Boolean(
+    status &&
+      status.selected_generator_key === generatorKey &&
+      status.selected_embedding_key === embeddingKey &&
+      status.selected_generator_load_preset === generatorLoadPreset &&
+      status.selected_torch_variant === torchVariant,
+  );
+  const canRetry =
+    setupStep === "review" &&
+    status?.install_state === "failed" &&
+    isSelectionSyncedWithStatus;
+  const reviewingPersistedRun =
+    isSelectionSyncedWithStatus &&
+    (status?.install_state === "installing" ||
+      status?.install_state === "failed" ||
+      hasSetupHistory(status));
+  const shouldShowProgress = setupStep === "review" && reviewingPersistedRun;
   const currentProgress = buildCurrentProgress(status);
+  const statusLabel =
+    status?.install_state === "ready"
+      ? "Ready"
+      : status?.install_state === "installing"
+        ? "Installing"
+        : canRetry
+          ? "Setup failed"
+          : setupStep === "review"
+            ? "Review setup"
+            : "Setup required";
+  const statusMessage =
+    status?.install_state === "installing"
+      ? status?.progress_message ?? "Installing the managed runtime..."
+      : canRetry
+        ? status?.last_error ??
+          status?.progress_message ??
+          "Setup failed. Review the summary or retry the last selection."
+        : setupStep === "review"
+          ? "Review the selected models and runtime, then start setup."
+          : "Choose the local models and runtime, then continue to review.";
+  const visibleError =
+    submitError ??
+    error ??
+    (canRetry ? status?.last_error ?? null : null);
+  const reviewSummaryItems = [
+    {
+      label: "Generator model",
+      value: generatorSelection?.label ?? "Generator not selected",
+      detail:
+        generatorSelection?.description ??
+        generatorSelection?.repo_id ??
+        "Model used for grounded answers and chat.",
+    },
+    {
+      label: "Embedding model",
+      value: embeddingSelection?.label ?? "Embedder not selected",
+      detail:
+        embeddingSelection?.description ??
+        embeddingSelection?.repo_id ??
+        "Retriever used for local document search.",
+    },
+    {
+      label: "Generator runtime",
+      value: presetSelection?.label ?? "Preset not selected",
+      detail:
+        presetGuide?.recommendation ??
+        presetSelection?.description ??
+        "Memory profile for the selected generator.",
+    },
+    {
+      label: "PyTorch runtime",
+      value: torchSelection?.label ?? "Torch runtime not selected",
+      detail:
+        torchSelection?.description ??
+        "Backend runtime for CPU or NVIDIA CUDA.",
+    },
+    {
+      label: "Detected hardware",
+      value: detectedGpuLabel,
+      detail:
+        options?.compute.cuda_available
+          ? "Setup will install the runtime that fits this GPU."
+          : "The managed runtime will use the CPU-safe path.",
+    },
+    {
+      label: "Suggested runtime",
+      value: presetSelection?.label ?? "Select a runtime preset",
+      detail:
+        presetGuide?.vramRange ??
+        "Recommended from the detected hardware profile.",
+    },
+  ];
 
   return (
     <div className="setup-shell">
       <section className="setup-hero">
-        <p className="setup-kicker">Desktop bootstrap setup</p>
-        <h1>Prepare the local runtime before opening the workspace.</h1>
-        <p className="setup-copy">
-          Choose the local generator, embedding model, and runtime path. The installer
-          creates the managed environment under
-          <code>%LOCALAPPDATA%\LocalDocumentIntelligence</code> and downloads only what
-          this machine needs.
-        </p>
+        <div className="setup-hero-top">
+          <div className="setup-hero-copy">
+            <p className="setup-kicker">Desktop bootstrap setup</p>
+            <h1>
+              {setupStep === "configure"
+                ? "Choose the local runtime before opening the workspace."
+                : "Review the setup before installing the local runtime."}
+            </h1>
+            <p className="setup-copy">
+              The installer creates the managed environment under
+              <code>%LOCALAPPDATA%\LocalDocumentIntelligence</code> and downloads
+              only what this machine needs.
+            </p>
+          </div>
 
-        <div className="setup-status-banner">
-          <span className="setup-status-label">
-            {status?.install_state === "ready"
-              ? "Ready"
-              : status?.install_state === "failed"
-                ? "Setup failed"
-                : status?.install_state === "installing"
-                  ? "Installing"
-                  : "Setup required"}
-          </span>
-          <span className="setup-status-message">
-            {status?.progress_message ?? "Choose your runtime and start setup."}
-          </span>
+          <div className="setup-stepper" aria-label="Setup steps">
+            <div
+              className={`setup-step ${setupStep === "configure" ? "is-active" : "is-complete"}`}
+            >
+              <span className="setup-step-index">1</span>
+              <span className="setup-step-text">Select models and runtime</span>
+            </div>
+            <div className={`setup-step ${setupStep === "review" ? "is-active" : ""}`}>
+              <span className="setup-step-index">2</span>
+              <span className="setup-step-text">Review and start setup</span>
+            </div>
+          </div>
         </div>
 
-        {shouldShowProgress && (
-          <div className="setup-progress-board">
-            <div className="setup-progress-card">
-              <div className="setup-progress-heading">
-                <span>Overall setup</span>
-                <strong>{status?.overall_progress ?? 0}%</strong>
+        <div className="setup-status-banner">
+          <span className="setup-status-label">{statusLabel}</span>
+          <span className="setup-status-message">{statusMessage}</span>
+        </div>
+
+        {setupStep === "configure" && (
+          <div className="setup-hardware-strip">
+            <div className="setup-hardware-item">
+              <span className="setup-hardware-label">Detected hardware</span>
+              <span className="setup-hardware-value">{detectedGpuLabel}</span>
+            </div>
+            <div className="setup-hardware-item">
+              <span className="setup-hardware-label">Suggested runtime</span>
+              <span className="setup-hardware-value">
+                {presetSelection?.label ?? "Select a runtime preset"}
+              </span>
+            </div>
+          </div>
+        )}
+
+        {visibleError && <p className="query-error">{visibleError}</p>}
+      </section>
+
+      {setupStep === "configure" ? (
+        <>
+          <section className="setup-grid">
+            <div className="setup-panel">
+              <div className="setup-panel-header">
+                <h2>Generator model</h2>
+                <p>Model used for grounded answers and chat.</p>
               </div>
-              <div className="setup-progress-track overall">
-                <div
-                  className="setup-progress-fill overall"
-                  style={{ width: `${status?.overall_progress ?? 0}%` }}
-                />
+              <SetupSelectField
+                label="Generator"
+                value={generatorKey}
+                onChange={setGeneratorKey}
+                items={(options?.generator_models ?? []).map((option) => ({
+                  value: option.key,
+                  label: formatSetupOptionLabel(option),
+                }))}
+                helper={
+                  generatorSelection?.description ??
+                  generatorSelection?.repo_id ??
+                  "Select a local generator."
+                }
+              />
+            </div>
+
+            <div className="setup-panel">
+              <div className="setup-panel-header">
+                <h2>Embedding model</h2>
+                <p>Retriever used for local document search.</p>
               </div>
-              <p className="setup-progress-caption">
-                {status?.progress_message ?? "Waiting for setup to start."}
+              <SetupSelectField
+                label="Embedder"
+                value={embeddingKey}
+                onChange={setEmbeddingKey}
+                items={(options?.embedding_models ?? []).map((option) => ({
+                  value: option.key,
+                  label: formatSetupOptionLabel(option),
+                }))}
+                helper={
+                  embeddingSelection?.description ??
+                  embeddingSelection?.repo_id ??
+                  "Select a retrieval embedding model."
+                }
+              />
+            </div>
+
+            <div className="setup-panel">
+              <div className="setup-panel-header">
+                <h2>Generator runtime</h2>
+                <p>Pick the memory profile that best matches the available VRAM.</p>
+              </div>
+              <SetupSelectField
+                label="Runtime preset"
+                value={generatorLoadPreset}
+                onChange={setGeneratorLoadPreset}
+                items={(options?.generator_load_presets ?? []).map((preset) => {
+                  const guide = generatorRuntimeGuide(preset, options);
+                  return {
+                    value: preset.key,
+                    label: `${preset.label} · ${guide.vramRange}`,
+                  };
+                })}
+                helper={
+                  presetGuide
+                    ? `${presetGuide.recommendation} ${presetSelection?.description ?? ""}`
+                    : "Select a runtime preset."
+                }
+              />
+            </div>
+
+            <div className="setup-panel">
+              <div className="setup-panel-header">
+                <h2>PyTorch runtime</h2>
+                <p>Install the backend runtime for CPU or NVIDIA CUDA.</p>
+              </div>
+              <SetupSelectField
+                label="PyTorch build"
+                value={torchVariant}
+                onChange={setTorchVariant}
+                items={(options?.torch_variants ?? []).map((variant) => ({
+                  value: variant.key,
+                  label: variant.label,
+                }))}
+                helper={
+                  torchSelection?.description ??
+                  "Select the runtime backend."
+                }
+              />
+            </div>
+          </section>
+
+          <section className="setup-footer-panel">
+            <div className="setup-footer-copy">
+              <h2>Continue to review</h2>
+              <p>
+                Confirm the selected models and runtime on the next screen before
+                setup begins.
               </p>
             </div>
 
-            {currentProgress && (
+            <div className="setup-actions">
+              <button
+                type="button"
+                className="setup-action-button primary"
+                onClick={handleNext}
+                disabled={!options || isSubmitting}
+              >
+                Next
+              </button>
+            </div>
+          </section>
+        </>
+      ) : (
+        <>
+          <section className="setup-review-panel">
+            <div className="setup-review-header">
+              <h2>Selection summary</h2>
+              <p>
+                {canRetry
+                  ? "Retry the last setup or go back and adjust the selection before starting again."
+                  : "Everything is ready. Start setup when this summary looks right."}
+              </p>
+            </div>
+
+            <div className="setup-review-grid">
+              {reviewSummaryItems.map((item) => (
+                <article key={item.label} className="setup-review-card">
+                  <span className="setup-review-label">{item.label}</span>
+                  <strong className="setup-review-value">{item.value}</strong>
+                  <p className="setup-review-detail">{item.detail}</p>
+                </article>
+              ))}
+            </div>
+          </section>
+
+          {shouldShowProgress && currentProgress && (
+            <section className="setup-progress-panel">
               <div className="setup-progress-card">
-                <div className="setup-progress-heading">
-                  <span>{currentProgress.title}</span>
-                  <strong>{currentProgress.progress}%</strong>
+                <div className="setup-progress-row">
+                  <p className="setup-progress-activity">
+                    {status?.progress_message ?? "Preparing setup..."}
+                  </p>
+                  <div className="setup-progress-meta">
+                    <span className="setup-progress-tag">Overall</span>
+                    <strong className="setup-progress-percent">
+                      {status?.overall_progress ?? 0}%
+                    </strong>
+                  </div>
                 </div>
-                <div className="setup-progress-card-meta">
-                  <p className="setup-progress-current-label">{currentProgress.label}</p>
-                  <span className={`setup-model-progress-state ${currentProgress.stateClass}`}>
-                    {currentProgress.stateLabel}
-                  </span>
+                <div className="setup-progress-track overall">
+                  <div
+                    className="setup-progress-fill overall"
+                    style={{ width: `${status?.overall_progress ?? 0}%` }}
+                  />
+                </div>
+              </div>
+
+              <div className="setup-progress-card">
+                <div className="setup-progress-row">
+                  <p className="setup-progress-activity">{currentProgress.activity}</p>
+                  <div className="setup-progress-meta">
+                    <span
+                      className={`setup-model-progress-state ${currentProgress.stateClass}`}
+                    >
+                      {currentProgress.stateLabel}
+                    </span>
+                    <strong className="setup-progress-percent">
+                      {currentProgress.progress}%
+                    </strong>
+                  </div>
                 </div>
                 <div
                   className={`setup-progress-track ${
@@ -379,149 +745,72 @@ export function SetupPane({
                     style={{ width: `${currentProgress.progress}%` }}
                   />
                 </div>
-                <p className="setup-progress-caption">{currentProgress.detail}</p>
               </div>
-            )}
-          </div>
-        )}
-
-        <div className="setup-hardware-strip">
-          <div className="setup-hardware-item">
-            <span className="setup-hardware-label">Detected hardware</span>
-            <span className="setup-hardware-value">{detectedGpuLabel}</span>
-          </div>
-          <div className="setup-hardware-item">
-            <span className="setup-hardware-label">Suggested runtime</span>
-            <span className="setup-hardware-value">
-              {presetSelection?.label ?? "Select a runtime preset"}
-            </span>
-          </div>
-        </div>
-
-        {(error || submitError || status?.last_error) && (
-          <p className="query-error">
-            {submitError ?? error ?? status?.last_error ?? "Unknown setup error."}
-          </p>
-        )}
-      </section>
-
-      <section className="setup-grid">
-        <div className="setup-panel">
-          <div className="setup-panel-header">
-            <h2>Generator model</h2>
-            <p>Model used for grounded answers and chat.</p>
-          </div>
-          <SetupSelectField
-            label="Generator"
-            value={generatorKey}
-            onChange={setGeneratorKey}
-            items={(options?.generator_models ?? []).map((option) => ({
-              value: option.key,
-              label: formatSetupOptionLabel(option),
-            }))}
-            helper={generatorSelection?.description ?? generatorSelection?.repo_id ?? "Select a local generator."}
-          />
-        </div>
-
-        <div className="setup-panel">
-          <div className="setup-panel-header">
-            <h2>Embedding model</h2>
-            <p>Retriever used for local document search.</p>
-          </div>
-          <SetupSelectField
-            label="Embedder"
-            value={embeddingKey}
-            onChange={setEmbeddingKey}
-            items={(options?.embedding_models ?? []).map((option) => ({
-              value: option.key,
-              label: formatSetupOptionLabel(option),
-            }))}
-            helper={embeddingSelection?.description ?? embeddingSelection?.repo_id ?? "Select a retrieval embedding model."}
-          />
-        </div>
-
-        <div className="setup-panel">
-          <div className="setup-panel-header">
-            <h2>Generator runtime</h2>
-            <p>Pick the memory profile that best matches the available VRAM.</p>
-          </div>
-          <SetupSelectField
-            label="Runtime preset"
-            value={generatorLoadPreset}
-            onChange={setGeneratorLoadPreset}
-            items={(options?.generator_load_presets ?? []).map((preset) => {
-              const guide = generatorRuntimeGuide(preset, options);
-              return {
-                value: preset.key,
-                label: `${preset.label} · ${guide.vramRange}`,
-              };
-            })}
-            helper={presetGuide ? `${presetGuide.recommendation} ${presetSelection?.description ?? ""}` : "Select a runtime preset."}
-          />
-        </div>
-
-        <div className="setup-panel">
-          <div className="setup-panel-header">
-            <h2>PyTorch runtime</h2>
-            <p>Install the backend runtime for CPU or NVIDIA CUDA.</p>
-          </div>
-          <SetupSelectField
-            label="PyTorch build"
-            value={torchVariant}
-            onChange={setTorchVariant}
-            items={(options?.torch_variants ?? []).map((variant) => ({
-              value: variant.key,
-              label: variant.label,
-            }))}
-            helper={torchSelection?.description ?? "Select the runtime backend."}
-          />
-        </div>
-      </section>
-
-      <section className="setup-summary-panel">
-        <div className="setup-summary-copy">
-          <h2>Summary</h2>
-          <p>
-            {generatorSelection?.label ?? "Generator not selected"} ·{" "}
-            {embeddingSelection?.label ?? "Embedder not selected"} ·{" "}
-            {presetSelection?.label ?? "Preset not selected"} ·{" "}
-            {torchSelection?.label ?? "Torch runtime not selected"}
-          </p>
-        </div>
-
-        <div className="setup-actions">
-          {status?.install_state === "failed" && (
-            <button
-              type="button"
-              className="setup-action-button secondary"
-              onClick={() => void handleRetry()}
-              disabled={isBusy || isSubmitting}
-            >
-              Retry
-            </button>
+            </section>
           )}
 
-          {isBusy ? (
-            <button
-              type="button"
-              className="setup-action-button danger"
-              onClick={() => void handleCancel()}
-              disabled={isSubmitting}
-            >
-              Cancel setup
-            </button>
-          ) : (
-            <button
-              type="button"
-              className="setup-action-button primary"
-              onClick={() => void handleStart()}
-              disabled={!options || isSubmitting}
-            >
-              Start setup
-            </button>
-          )}
-        </div>
-      </section>
+          <section className="setup-footer-panel">
+            <div className="setup-footer-copy">
+              <h2>
+                {isBusy
+                  ? "Installing local runtime"
+                  : canRetry
+                    ? "Setup needs attention"
+                    : "Ready to start setup"}
+              </h2>
+              <p>
+                {isBusy
+                  ? "The installer is creating the managed environment and downloading the selected assets."
+                  : canRetry
+                    ? "Use Retry for the last selection, or go back to change the setup choices."
+                    : "Start setup to install packages, the selected runtime, and the local models."}
+              </p>
+            </div>
+
+            <div className="setup-actions">
+              {!isBusy && (
+                <button
+                  type="button"
+                  className="setup-action-button secondary"
+                  onClick={handleBack}
+                  disabled={isSubmitting}
+                >
+                  Back
+                </button>
+              )}
+
+              {isBusy ? (
+                <button
+                  type="button"
+                  className="setup-action-button danger"
+                  onClick={() => void handleCancel()}
+                  disabled={isSubmitting}
+                >
+                  Cancel setup
+                </button>
+              ) : canRetry ? (
+                <button
+                  type="button"
+                  className="setup-action-button primary"
+                  onClick={() => void handleRetry()}
+                  disabled={isSubmitting}
+                >
+                  Retry
+                </button>
+              ) : (
+                <button
+                  type="button"
+                  className="setup-action-button primary"
+                  onClick={() => void handleStart()}
+                  disabled={!options || isSubmitting}
+                >
+                  Start setup
+                </button>
+              )}
+            </div>
+          </section>
+        </>
+      )}
     </div>
   );
 }
