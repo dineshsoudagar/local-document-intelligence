@@ -5,7 +5,6 @@ from __future__ import annotations
 import time
 from dataclasses import dataclass
 from typing import Any, Iterator, Sequence
-
 from src.config.generator_config import GeneratorConfig
 from src.generation.context_builder import (
     AnswerSource,
@@ -155,6 +154,18 @@ class GroundedAnswerService:
             query,
             doc_ids=doc_ids,
         )
+
+        should_retry_second_pass = self._should_retry_with_query_expansion(retrieved_chunks)
+        if should_retry_second_pass:
+            second_pass_chunks, second_pass_seconds = self._retrieve_second_pass_chunks(
+                query,
+                doc_ids=doc_ids,
+                first_pass_chunks=retrieved_chunks,
+            )
+            retrieval_seconds += second_pass_seconds
+            if second_pass_chunks:
+                retrieved_chunks = second_pass_chunks
+
         resolved_mode, fallback_reason = self._resolve_mode(mode, retrieved_chunks)
 
         if resolved_mode == "chat":
@@ -264,6 +275,31 @@ class GroundedAnswerService:
             doc_ids=doc_ids,
         )
 
+        should_retry_second_pass = self._should_retry_with_query_expansion(retrieved_chunks)
+        if should_retry_second_pass:
+            second_pass_chunks, second_pass_seconds = self._retrieve_second_pass_chunks(
+                query,
+                doc_ids=doc_ids,
+                first_pass_chunks=retrieved_chunks,
+            )
+            retrieval_seconds += second_pass_seconds
+            if second_pass_chunks:
+                retrieved_chunks = second_pass_chunks
+
+        resolved_mode, fallback_reason = self._resolve_mode(mode, retrieved_chunks)
+
+        if resolved_mode == "chat":
+            return self._build_stream_response(
+                query=query,
+                mode_used="chat",
+                reasoning_mode=resolved_reasoning_mode,
+                context=self._empty_context(),
+                retrieved_chunk_count=len(retrieved_chunks),
+                retrieval_seconds=retrieval_seconds,
+                fallback_reason=fallback_reason,
+                stream_thinking=stream_thinking,
+            )
+
         if not retrieved_chunks:
             start_payload = StreamStartPayload(
                 query=query,
@@ -294,11 +330,22 @@ class GroundedAnswerService:
             stream_thinking=stream_thinking,
         )
 
-    def _retrieve_chunks(self, query: str, *,
-                         doc_ids: list[str] | None = None) -> tuple[list[RetrievedChunk], float]:
+    def _retrieve_chunks(
+        self,
+        query: str,
+        *,
+        doc_ids: list[str] | None = None,
+        top_k: int | None = None,
+        rerank_instruction: str | None = None,
+    ) -> tuple[list[RetrievedChunk], float]:
         """Run retrieval for the supplied query."""
         started_at = time.perf_counter()
-        retrieved_chunks = self._index.search(query, doc_ids=doc_ids)
+        retrieved_chunks = self._index.search(
+            query,
+            top_k=top_k,
+            doc_ids=doc_ids,
+            rerank_instruction=rerank_instruction,
+        )
         retrieval_seconds = time.perf_counter() - started_at
         return retrieved_chunks, retrieval_seconds
 
@@ -480,6 +527,154 @@ class GroundedAnswerService:
             return True, None
 
         return False, f"low_top_rerank_score: {top_score:.4f}"
+
+
+    def _should_retry_with_query_expansion(
+        self,
+        retrieved_chunks: Sequence[RetrievedChunk],
+    ) -> bool:
+        """Return whether first-pass retrieval is weak enough to justify expansion fallback."""
+        config = self._retrieval_config.pass2
+
+        if not config.enabled:
+            return False
+
+        if not retrieved_chunks:
+            return True
+
+        top_rerank = retrieved_chunks[0].rerank_score
+        if top_rerank < config.retry_top_rerank_below:
+            return True
+
+        supporting_chunks = sum(
+            1
+            for chunk in retrieved_chunks
+            if chunk.rerank_score >= config.retry_support_rerank_threshold
+        )
+        if supporting_chunks < config.retry_min_supporting_chunks:
+            return True
+
+        return False
+
+
+    @staticmethod
+    def _merge_unique_chunks(chunks: Sequence[RetrievedChunk]) -> list[RetrievedChunk]:
+        """Merge chunks by chunk_id, keeping the strongest current score."""
+        merged: dict[str, RetrievedChunk] = {}
+
+        for chunk in chunks:
+            existing = merged.get(chunk.chunk_id)
+            if existing is None or chunk.final_score > existing.final_score:
+                merged[chunk.chunk_id] = chunk
+
+        return list(merged.values())
+
+
+    @staticmethod
+    def _chunk_heading_key(chunk: RetrievedChunk) -> str:
+        """Return a stable top-level heading key for diversity control."""
+        headings = chunk.metadata.get("headings")
+        if isinstance(headings, list) and headings:
+            return str(headings[0]).strip() or "__root__"
+        return "__root__"
+
+
+    @staticmethod
+    def _chunk_section_key(chunk: RetrievedChunk) -> str:
+        """Return a stable full heading-path key for diversity control."""
+        headings = chunk.metadata.get("headings")
+        if isinstance(headings, list) and headings:
+            parts = [str(item).strip() for item in headings if str(item).strip()]
+            return " > ".join(parts) or "__root__"
+        return "__root__"
+
+
+    @staticmethod
+    def _chunk_document_key(chunk: RetrievedChunk) -> str:
+        """Return a stable document key for diversity control."""
+        doc_id = chunk.metadata.get("doc_id")
+        if doc_id:
+            return str(doc_id)
+        if chunk.source_file:
+            return str(chunk.source_file)
+        return chunk.chunk_id
+
+
+    def _filter_second_pass_chunks(
+        self,
+        retrieved_chunks: Sequence[RetrievedChunk],
+    ) -> list[RetrievedChunk]:
+        """Apply rerank threshold and bounded diversity limits."""
+        config = self._retrieval_config.pass2
+        filtered: list[RetrievedChunk] = []
+
+        heading_counts: dict[str, int] = {}
+        section_counts: dict[str, int] = {}
+        document_counts: dict[str, int] = {}
+
+        for chunk in retrieved_chunks:
+            if chunk.rerank_score < config.rerank_keep_threshold:
+                continue
+
+            heading_key = self._chunk_heading_key(chunk)
+            section_key = self._chunk_section_key(chunk)
+            document_key = self._chunk_document_key(chunk)
+
+            if heading_counts.get(heading_key, 0) >= config.max_chunks_per_heading:
+                continue
+            if section_counts.get(section_key, 0) >= config.max_chunks_per_section:
+                continue
+            if document_counts.get(document_key, 0) >= config.max_chunks_per_document:
+                continue
+
+            filtered.append(chunk)
+            heading_counts[heading_key] = heading_counts.get(heading_key, 0) + 1
+            section_counts[section_key] = section_counts.get(section_key, 0) + 1
+            document_counts[document_key] = document_counts.get(document_key, 0) + 1
+
+            if len(filtered) >= config.final_top_k:
+                break
+
+        return filtered
+
+
+    def _retrieve_second_pass_chunks(
+        self,
+        query: str,
+        *,
+        doc_ids: list[str] | None = None,
+        first_pass_chunks: Sequence[RetrievedChunk],
+    ) -> tuple[list[RetrievedChunk], float]:
+        """Run query-expansion retrieval and return final reranked filtered chunks."""
+        started_at = time.perf_counter()
+
+        expanded_queries = self.generator.generate_query_expansions(
+            query=query,
+            config=self._retrieval_config.rewrite,
+        )
+
+        merged_chunks = self._merge_unique_chunks(first_pass_chunks)
+
+        for expanded_query in expanded_queries:
+            if expanded_query.casefold() == query.casefold():
+                continue
+
+            expanded_chunks, _ = self._retrieve_chunks(
+                expanded_query,
+                doc_ids=doc_ids,
+                top_k=self._retrieval_config.pass2.top_k_per_rewrite,
+                rerank_instruction=self._retrieval_config.pass2.rerank_instruction,
+            )
+            merged_chunks = self._merge_unique_chunks([*merged_chunks, *expanded_chunks])
+
+        reranked_chunks = self._index.rerank_existing_chunks(
+            query=query,
+            chunks=merged_chunks,
+            instruction=self._retrieval_config.pass2.rerank_instruction,
+        )
+        filtered_chunks = self._filter_second_pass_chunks(reranked_chunks)
+        retrieval_seconds = time.perf_counter() - started_at
+        return filtered_chunks, retrieval_seconds
 
     @staticmethod
     def _empty_context() -> GroundedContext:

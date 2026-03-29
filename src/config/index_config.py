@@ -45,14 +45,6 @@ class IndexConfig:
     fused_top_k: int = 20
     final_top_k: int = 10
 
-    use_dynamic_blend: bool = True
-    dynamic_blend_top_n: int = 10
-
-    rerank_strong_top_gap: float = 0.20
-    rerank_strong_top_vs_mean: float = 0.25
-    rerank_medium_top_gap: float = 0.08
-    rerank_medium_top_vs_mean: float = 0.12
-
     show_progress: bool = True
 
     def __post_init__(self) -> None:
@@ -110,16 +102,6 @@ class IndexConfig:
             raise ValueError("final_top_k must be greater than 0")
         if self.final_top_k > self.fused_top_k:
             raise ValueError("final_top_k must be smaller than or equal to fused_top_k")
-        if self.dynamic_blend_top_n <= 0:
-            raise ValueError("dynamic_blend_top_n must be greater than 0")
-        if self.rerank_strong_top_gap < 0.0:
-            raise ValueError("rerank_strong_top_gap must be non-negative")
-        if self.rerank_strong_top_vs_mean < 0.0:
-            raise ValueError("rerank_strong_top_vs_mean must be non-negative")
-        if self.rerank_medium_top_gap < 0.0:
-            raise ValueError("rerank_medium_top_gap must be non-negative")
-        if self.rerank_medium_top_vs_mean < 0.0:
-            raise ValueError("rerank_medium_top_vs_mean must be non-negative")
         dense_path = Path(self.dense_model_name)
         reranker_path = Path(self.reranker_model_name)
 

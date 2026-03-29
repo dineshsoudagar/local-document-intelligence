@@ -3,12 +3,11 @@
 from __future__ import annotations
 
 import uuid
-from dataclasses import dataclass
 from pathlib import Path
-from typing import Any
 
 from qdrant_client import QdrantClient, models
-
+from dataclasses import dataclass, replace
+from typing import Any, Sequence
 from src.config.index_config import IndexConfig
 from src.parser.text_chunk import ParsedChunk
 from src.retrieval.qwen_models import QwenDenseEmbedder, QwenReranker
@@ -197,23 +196,9 @@ class QdrantHybridIndex:
                 f"{len(rerank_scores)} != {len(fused_candidates)}"
             )
 
-        fusion_values = [candidate["fused_score"] for candidate in fused_candidates]
-        fusion_norms = self._min_max_normalize(fusion_values)
-        rerank_norms = self._min_max_normalize(rerank_scores)
-
-        fusion_weight, rerank_weight = self._resolve_blend_weights(rerank_scores)
 
         results: list[RetrievedChunk] = []
-        for candidate, rerank_score, fusion_norm, rerank_norm in zip(
-            fused_candidates,
-            rerank_scores,
-            fusion_norms,
-            rerank_norms,
-        ):
-            final_score = (
-                fusion_weight * fusion_norm
-                + rerank_weight * rerank_norm
-            )
+        for candidate, rerank_score in zip(fused_candidates, rerank_scores):
             results.append(
                 RetrievedChunk(
                     chunk_id=candidate["chunk_id"],
@@ -224,12 +209,12 @@ class QdrantHybridIndex:
                     page_end=candidate["page_end"],
                     fused_score=candidate["fused_score"],
                     rerank_score=rerank_score,
-                    final_score=final_score,
+                    final_score=rerank_score,
                 )
             )
 
         results.sort(
-            key=lambda item: (item.rerank_score, item.final_score, item.fused_score),
+            key=lambda item: (item.rerank_score, item.fused_score),
             reverse=True,
         )
         return results[:final_limit]
@@ -292,23 +277,8 @@ class QdrantHybridIndex:
                 f"{len(rerank_scores)} != {len(fused_candidates)}"
             )
 
-        fusion_values = [candidate["fused_score"] for candidate in fused_candidates]
-        fusion_norms = self._min_max_normalize(fusion_values)
-        rerank_norms = self._min_max_normalize(rerank_scores)
-
-        fusion_weight, rerank_weight = self._resolve_blend_weights(rerank_scores)
-
         reranked: list[dict[str, Any]] = []
-        for candidate, rerank_score, fusion_norm, rerank_norm in zip(
-                fused_candidates,
-                rerank_scores,
-                fusion_norms,
-                rerank_norms,
-        ):
-            final_score = (
-                    fusion_weight * fusion_norm
-                    + rerank_weight * rerank_norm
-            )
+        for candidate, rerank_score in zip(fused_candidates, rerank_scores):
             reranked.append(
                 {
                     "chunk_id": candidate["chunk_id"],
@@ -316,23 +286,17 @@ class QdrantHybridIndex:
                     "pages": (candidate["page_start"], candidate["page_end"]),
                     "fusion_score": candidate["fused_score"],
                     "rerank_score": rerank_score,
-                    "fusion_norm": fusion_norm,
-                    "rerank_norm": rerank_norm,
-                    "final_score": final_score,
+                    "final_score": rerank_score,
                     "preview": candidate["text"][:max_text_len],
                 }
             )
 
         reranked.sort(
-            key=lambda item: (item["final_score"], item["rerank_score"], item["fusion_score"]),
+            key=lambda item: (item["rerank_score"], item["fusion_score"]),
             reverse=True,
         )
 
         return {
-            "blend": {
-                "fusion_weight": fusion_weight,
-                "rerank_weight": rerank_weight,
-            },
             "dense": [
                 {
                     "chunk_id": str((point.payload or {}).get("chunk_id") or point.id),
@@ -420,38 +384,45 @@ class QdrantHybridIndex:
             )
         return self._reranker
 
-    def _resolve_blend_weights(self, rerank_scores: list[float]) -> tuple[float, float]:
-        """Choose fusion and rerank weights from reranker score separation."""
-        if not self._config.use_dynamic_blend:
-            return 0.65, 0.35
+    def rerank_existing_chunks(
+        self,
+        query: str,
+        chunks: Sequence[RetrievedChunk],
+        *,
+        instruction: str | None = None,
+    ) -> list[RetrievedChunk]:
+        """Rerank an existing chunk set against one common query."""
+        if not chunks:
+            return []
 
-        if not rerank_scores:
-            return 0.75, 0.25
+        reranker = self._get_reranker()
+        rerank_instruction = instruction or self._config.rerank_instruction
+        rerank_scores = reranker.score(
+            query=query,
+            documents=[chunk.text for chunk in chunks],
+            instruction=rerank_instruction,
+        )
 
-        sorted_scores = sorted(rerank_scores, reverse=True)
-        top_n = min(self._config.dynamic_blend_top_n, len(sorted_scores))
-        top_scores = sorted_scores[:top_n]
+        if len(rerank_scores) != len(chunks):
+            raise RuntimeError(
+                "Reranker returned a mismatched number of scores: "
+                f"{len(rerank_scores)} != {len(chunks)}"
+            )
 
-        top1 = sorted_scores[0]
-        top2 = sorted_scores[1] if len(sorted_scores) > 1 else sorted_scores[0]
-        top_mean = sum(top_scores) / len(top_scores)
+        reranked = [
+            replace(
+                chunk,
+                rerank_score=score,
+                final_score=score,
+            )
+            for chunk, score in zip(chunks, rerank_scores)
+        ]
+        reranked.sort(
+            key=lambda item: (item.rerank_score, item.fused_score),
+            reverse=True,
+        )
+        return reranked
 
-        top_gap = top1 - top2
-        top_vs_mean = top1 - top_mean
-
-        if (
-                top_gap >= self._config.rerank_strong_top_gap
-                and top_vs_mean >= self._config.rerank_strong_top_vs_mean
-        ):
-            return 0.45, 0.55
-
-        if (
-                top_gap >= self._config.rerank_medium_top_gap
-                or top_vs_mean >= self._config.rerank_medium_top_vs_mean
-        ):
-            return 0.60, 0.40
-
-        return 0.75, 0.25
 
     @staticmethod
     def _min_max_normalize(values: list[float]) -> list[float]:

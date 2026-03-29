@@ -7,7 +7,7 @@ from pathlib import Path
 import re
 from dataclasses import dataclass
 from typing import Any, Iterator, Literal, Sequence
-
+from src.config.retrieval_control_config import RewriteConfig
 import torch
 from threading import Thread
 from sentence_transformers import SentenceTransformer
@@ -704,6 +704,70 @@ class LocalQwenGenerator:
         )
         return self._extract_json(generated.answer)
     
+    
+    def generate_query_expansions(
+        self,
+        *,
+        query: str,
+        config: RewriteConfig,
+    ) -> list[str]:
+        """Generate normalized query expansions for retrieval fallback."""
+        payload = self.generate_structured_json(
+            system_prompt=(
+                f"{config.system_prompt} "
+                "Return exactly one JSON object and nothing else."
+            ),
+            user_prompt=(
+                f"User query:\n{query}\n\n"
+                f"{config.user_instruction}\n\n"
+                f"Generate exactly {config.max_rewrites} unique rewrites.\n"
+                "The first rewrite must be the original query exactly as written.\n"
+                "Keep every rewrite short, standalone, and search-ready.\n"
+                "Do not number items. Do not include explanations."
+            ),
+            max_new_tokens=config.max_new_tokens,
+            temperature=config.temperature,
+            top_p=config.top_p,
+            repetition_penalty=config.repetition_penalty,
+            enable_thinking=(config.reasoning_mode == "think"),
+        )
+        return self._normalize_query_expansions(
+            query=query,
+            rewrites=payload.get("rewrites"),
+            max_rewrites=config.max_rewrites,
+        )
+
+
+    @staticmethod
+    def _normalize_query_expansions(
+        *,
+        query: str,
+        rewrites: Any,
+        max_rewrites: int,
+    ) -> list[str]:
+        """Normalize expansion rewrites and keep the original query first."""
+        original = " ".join(str(query or "").split()).strip()
+        if not original:
+            return []
+
+        ordered: list[str] = [original]
+        seen = {original.casefold()}
+
+        if isinstance(rewrites, list):
+            for item in rewrites:
+                text = " ".join(str(item or "").split()).strip()
+                if not text:
+                    continue
+                key = text.casefold()
+                if key in seen:
+                    continue
+                seen.add(key)
+                ordered.append(text)
+                if len(ordered) >= max_rewrites:
+                    break
+
+        return ordered[:max_rewrites]
+
     def build_messages_prompt(
         self,
         *,
