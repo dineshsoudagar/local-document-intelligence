@@ -229,7 +229,7 @@ class QdrantHybridIndex:
             )
 
         results.sort(
-            key=lambda item: (item.final_score, item.rerank_score, item.fused_score),
+            key=lambda item: (item.rerank_score, item.final_score, item.fused_score),
             reverse=True,
         )
         return results[:final_limit]

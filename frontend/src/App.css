@@ -156,7 +156,17 @@ h3 {
   line-height: 1.5;
 }
 
-.theme-toggle {
+.center-header-actions {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.header-action-button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
   padding: 9px 14px;
   border: 1px solid #dbe3ee;
   border-radius: 999px;
@@ -170,14 +180,19 @@ h3 {
     box-shadow 0.2s ease;
 }
 
-.theme-toggle:hover {
+.theme-toggle {
+  min-width: 46px;
+  padding-inline: 13px;
+}
+
+.header-action-button:hover {
   transform: translateY(-1px);
   background: #f8fbff;
   border-color: #93c5fd;
   box-shadow: 0 6px 16px rgba(59, 130, 246, 0.12);
 }
 
-.theme-toggle svg {
+.header-action-button svg {
   width: 18px;
   height: 18px;
   display: block;
@@ -186,6 +201,11 @@ h3 {
   stroke-width: 1.8;
   stroke-linecap: round;
   stroke-linejoin: round;
+}
+
+.settings-button span {
+  font-size: 13px;
+  font-weight: 700;
 }
 
 /* Remove default list styling */
@@ -847,7 +867,7 @@ body[data-theme="dark"] .document-menu-button,
 body[data-theme="dark"] .documents-clear-button,
 body[data-theme="dark"] .document-menu-item,
 body[data-theme="dark"] .scope-button,
-body[data-theme="dark"] .theme-toggle,
+body[data-theme="dark"] .header-action-button,
 body[data-theme="dark"] .query-input {
   color: #e5eefb;
 }
@@ -867,7 +887,7 @@ body[data-theme="dark"] .document-button,
 body[data-theme="dark"] .document-menu-button,
 body[data-theme="dark"] .documents-clear-button,
 body[data-theme="dark"] .scope-button,
-body[data-theme="dark"] .theme-toggle,
+body[data-theme="dark"] .header-action-button,
 body[data-theme="dark"] .query-input,
 body[data-theme="dark"] .composer-section,
 body[data-theme="dark"] .chat-window,
@@ -881,7 +901,7 @@ body[data-theme="dark"] .document-button,
 body[data-theme="dark"] .document-menu-button,
 body[data-theme="dark"] .documents-clear-button,
 body[data-theme="dark"] .scope-button,
-body[data-theme="dark"] .theme-toggle,
+body[data-theme="dark"] .header-action-button,
 body[data-theme="dark"] .query-input,
 body[data-theme="dark"] .composer-section,
 body[data-theme="dark"] .chat-bubble-assistant,

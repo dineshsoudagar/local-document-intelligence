@@ -18,6 +18,7 @@ type QueryPaneProps = {
   onSubmit: () => void;
   onStop: () => void;
   onToggleTheme: () => void;
+  onOpenSettings: () => void;
   onUploadFile: (file: File) => Promise<void>;
 };
 
@@ -37,6 +38,7 @@ export function QueryPane({
   onSubmit,
   onStop,
   onToggleTheme,
+  onOpenSettings,
   onUploadFile,
 }: QueryPaneProps) {
   const transcriptEndRef = useRef<HTMLDivElement | null>(null);
@@ -184,31 +186,47 @@ export function QueryPane({
             </p>
           </div>
 
-          <button
-            type="button"
-            className="theme-toggle"
-            onClick={onToggleTheme}
-            aria-label={theme === "light" ? "Switch to dark mode" : "Switch to light mode"}
-            title={theme === "light" ? "Switch to dark mode" : "Switch to light mode"}
-          >
-            {theme === "light" ? (
+          <div className="center-header-actions">
+            <button
+              type="button"
+              className="header-action-button settings-button"
+              onClick={onOpenSettings}
+              aria-label="Open setup settings"
+              title="Open setup settings"
+            >
               <svg viewBox="0 0 24 24" aria-hidden="true">
-                <path d="M21 12.8A9 9 0 1 1 11.2 3a7 7 0 0 0 9.8 9.8Z" />
+                <path d="M12 8.75A3.25 3.25 0 1 0 12 15.25A3.25 3.25 0 1 0 12 8.75Z" />
+                <path d="M19.4 15A1 1 0 0 0 19.6 16.1L20.1 16.95A1 1 0 0 1 19.75 18.3L18.3 19.75A1 1 0 0 1 16.95 20.1L16.1 19.6A1 1 0 0 0 15 19.4L14.05 19.8A1 1 0 0 0 13.45 20.72V21.75A1 1 0 0 1 12.45 22.75H11.55A1 1 0 0 1 10.55 21.75V20.72A1 1 0 0 0 9.95 19.8L9 19.4A1 1 0 0 0 7.9 19.6L7.05 20.1A1 1 0 0 1 5.7 19.75L4.25 18.3A1 1 0 0 1 3.9 16.95L4.4 16.1A1 1 0 0 0 4.6 15L4.2 14.05A1 1 0 0 0 3.28 13.45H2.25A1 1 0 0 1 1.25 12.45V11.55A1 1 0 0 1 2.25 10.55H3.28A1 1 0 0 0 4.2 9.95L4.6 9A1 1 0 0 0 4.4 7.9L3.9 7.05A1 1 0 0 1 4.25 5.7L5.7 4.25A1 1 0 0 1 7.05 3.9L7.9 4.4A1 1 0 0 0 9 4.6L9.95 4.2A1 1 0 0 0 10.55 3.28V2.25A1 1 0 0 1 11.55 1.25H12.45A1 1 0 0 1 13.45 2.25V3.28A1 1 0 0 0 14.05 4.2L15 4.6A1 1 0 0 0 16.1 4.4L16.95 3.9A1 1 0 0 1 18.3 4.25L19.75 5.7A1 1 0 0 1 20.1 7.05L19.6 7.9A1 1 0 0 0 19.4 9L19.8 9.95A1 1 0 0 0 20.72 10.55H21.75A1 1 0 0 1 22.75 11.55V12.45A1 1 0 0 1 21.75 13.45H20.72A1 1 0 0 0 19.8 14.05L19.4 15Z" />
               </svg>
-            ) : (
-              <svg viewBox="0 0 24 24" aria-hidden="true">
-                <circle cx="12" cy="12" r="4" />
-                <path d="M12 2v2.5" />
-                <path d="M12 19.5V22" />
-                <path d="M4.93 4.93l1.77 1.77" />
-                <path d="M17.3 17.3l1.77 1.77" />
-                <path d="M2 12h2.5" />
-                <path d="M19.5 12H22" />
-                <path d="M4.93 19.07l1.77-1.77" />
-                <path d="M17.3 6.7l1.77-1.77" />
-              </svg>
-            )}
-          </button>
+              <span>Settings</span>
+            </button>
+
+            <button
+              type="button"
+              className="header-action-button theme-toggle"
+              onClick={onToggleTheme}
+              aria-label={theme === "light" ? "Switch to dark mode" : "Switch to light mode"}
+              title={theme === "light" ? "Switch to dark mode" : "Switch to light mode"}
+            >
+              {theme === "light" ? (
+                <svg viewBox="0 0 24 24" aria-hidden="true">
+                  <path d="M21 12.8A9 9 0 1 1 11.2 3a7 7 0 0 0 9.8 9.8Z" />
+                </svg>
+              ) : (
+                <svg viewBox="0 0 24 24" aria-hidden="true">
+                  <circle cx="12" cy="12" r="4" />
+                  <path d="M12 2v2.5" />
+                  <path d="M12 19.5V22" />
+                  <path d="M4.93 4.93l1.77 1.77" />
+                  <path d="M17.3 17.3l1.77 1.77" />
+                  <path d="M2 12h2.5" />
+                  <path d="M19.5 12H22" />
+                  <path d="M4.93 19.07l1.77-1.77" />
+                  <path d="M17.3 6.7l1.77-1.77" />
+                </svg>
+              )}
+            </button>
+          </div>
         </div>
       </div>
 

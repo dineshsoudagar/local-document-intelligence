@@ -54,6 +54,7 @@ export default function App() {
   const [setupStatus, setSetupStatus] = useState<SetupStatus | null>(null);
   const [setupError, setSetupError] = useState<string | null>(null);
   const [isSetupLoading, setIsSetupLoading] = useState(true);
+  const [isReconfiguringSetup, setIsReconfiguringSetup] = useState(false);
   const abortControllerRef = useRef<AbortController | null>(null);
 
   const isRuntimeReady = setupStatus?.install_state === "ready";
@@ -251,6 +252,18 @@ export default function App() {
     abortControllerRef.current = null;
     setIsSubmitting(false);
     setQueryStatus("idle");
+  }
+
+  function handleOpenSetupSettings() {
+    handleStop();
+    setQueryError(null);
+    setUploadError(null);
+    setSetupError(null);
+    setIsReconfiguringSetup(true);
+  }
+
+  function handleReturnToWorkspace() {
+    setIsReconfiguringSetup(false);
   }
 
   async function handleStartSetup(payload: {
@@ -472,12 +485,14 @@ export default function App() {
     return <div className="setup-loading">Loading desktop runtime setup...</div>;
   }
 
-  if (!isRuntimeReady) {
+  if (!isRuntimeReady || isReconfiguringSetup) {
     return (
       <SetupPane
         options={setupOptions}
         status={setupStatus}
         error={setupError}
+        forceConfigureStep={isReconfiguringSetup}
+        onReturnToWorkspace={isRuntimeReady ? handleReturnToWorkspace : undefined}
         onStart={handleStartSetup}
         onRetry={handleRetrySetup}
         onCancel={handleCancelSetup}
@@ -522,6 +537,7 @@ export default function App() {
         onToggleTheme={() =>
           setTheme((currentTheme) => (currentTheme === "light" ? "dark" : "light"))
         }
+        onOpenSettings={handleOpenSetupSettings}
         onUploadFile={handleUploadFile}
       />
     </div>

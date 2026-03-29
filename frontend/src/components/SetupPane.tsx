@@ -12,6 +12,8 @@ type SetupPaneProps = {
   options: SetupOptions | null;
   status: SetupStatus | null;
   error: string | null;
+  forceConfigureStep?: boolean;
+  onReturnToWorkspace?: () => void;
   onStart: (payload: SetupStartPayload) => Promise<void>;
   onRetry: () => Promise<void>;
   onCancel: () => Promise<void>;
@@ -233,6 +235,8 @@ export function SetupPane({
   options,
   status,
   error,
+  forceConfigureStep = false,
+  onReturnToWorkspace,
   onStart,
   onRetry,
   onCancel,
@@ -302,6 +306,16 @@ export function SetupPane({
   }, [options, status]);
 
   useEffect(() => {
+    if (forceConfigureStep) {
+      setSetupStep("configure");
+    }
+  }, [forceConfigureStep]);
+
+  useEffect(() => {
+    if (forceConfigureStep) {
+      return;
+    }
+
     if (!status) {
       return;
     }
@@ -314,7 +328,7 @@ export function SetupPane({
     if (shouldOpenReviewStep(status)) {
       setSetupStep("review");
     }
-  }, [status]);
+  }, [forceConfigureStep, status]);
 
   function validateSelections() {
     if (!generatorKey || !embeddingKey || !generatorLoadPreset || !torchVariant) {
@@ -659,6 +673,16 @@ export function SetupPane({
             </div>
 
             <div className="setup-actions">
+              {onReturnToWorkspace && (
+                <button
+                  type="button"
+                  className="setup-action-button secondary"
+                  onClick={onReturnToWorkspace}
+                  disabled={isSubmitting}
+                >
+                  Back to workspace
+                </button>
+              )}
               <button
                 type="button"
                 className="setup-action-button primary"
@@ -768,6 +792,16 @@ export function SetupPane({
             </div>
 
             <div className="setup-actions">
+              {onReturnToWorkspace && !isBusy && (
+                <button
+                  type="button"
+                  className="setup-action-button secondary"
+                  onClick={onReturnToWorkspace}
+                  disabled={isSubmitting}
+                >
+                  Back to workspace
+                </button>
+              )}
               {!isBusy && (
                 <button
                   type="button"
