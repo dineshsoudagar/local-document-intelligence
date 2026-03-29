@@ -72,10 +72,18 @@ class RuntimeController:
         """Rebuild services from the current persisted config."""
         self.close()
         try:
-            return self.initialize_if_ready()
+            result = self.initialize_if_ready()
+            logging.getLogger(__name__).info(
+                "Runtime reload completed ready=%s install_state=%s last_error=%s",
+                result,
+                self._config.install_state,
+                self._last_error,
+            )
+            return result
         except Exception as exc:
             self._last_error = str(exc)
             self._services = None
+            logging.getLogger(__name__).exception("Runtime reload failed: %s", exc)
             return False
 
     def close(self) -> None:
@@ -89,6 +97,31 @@ class RuntimeController:
             close_method()
 
         self._services = None
+
+    def diagnostics(self) -> dict[str, str | bool | None]:
+        """Return runtime and parser warmup diagnostics for health/debug endpoints."""
+        services = self._services
+        index_service = services.index_service if services is not None else None
+
+        diagnostics: dict[str, str | bool | None] = {
+            "runtime_initialized": services is not None,
+            "runtime_last_error": self._last_error,
+            "runtime_install_state": self._config.install_state,
+            "parser_warmup_ran_in_process": False,
+            "parser_warmup_started_at": None,
+            "parser_warmup_completed_at": None,
+            "parser_warmup_completed": False,
+            "parser_warmup_error": None,
+        }
+
+        if index_service is None:
+            return diagnostics
+
+        warmup_snapshot = getattr(index_service, "parser_warmup_snapshot", None)
+        if callable(warmup_snapshot):
+            diagnostics.update(warmup_snapshot())
+
+        return diagnostics
 
     def _build_services(self, config: ManagedAppConfig) -> RuntimeServices:
         """Create the heavyweight application services from one runtime config."""
@@ -150,6 +183,11 @@ class RuntimeController:
                 "Parser warmup failed during runtime startup: %s",
                 exc,
             )
+        logging.getLogger(__name__).info(
+            "Runtime services initialized parser_warmup_completed=%s parser_warmup_error=%s",
+            index_service.parser_warmup_completed,
+            index_service.parser_warmup_error,
+        )
 
         generator = LocalQwenGenerator(generator_config.generator_model_path, config=generator_config)
         answer_service = GroundedAnswerService(

@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import logging
+import os
 from contextlib import asynccontextmanager
 from pathlib import Path
 
@@ -13,7 +15,12 @@ from src.api.routes_documents import router as documents_router
 from src.api.routes_health import router as health_router
 from src.api.routes_query import router as query_router
 from src.api.routes_setup import router as setup_router
-from src.app.paths import AppPaths
+from src.app.backend_logging import configure_backend_logging
+from src.app.paths import (
+    AppPaths,
+    BACKEND_RUNTIME_MODE_ENV_VAR,
+    LAUNCHER_LOG_PATH_ENV_VAR,
+)
 from src.app.runtime_controller import RuntimeController
 from src.app.setup_service import SetupService
 from src.config.api_config import ApiConfig
@@ -24,6 +31,7 @@ API_PREFIXES = {
     "setup",
     "health",
     "healthz",
+    "readyz",
     "docs",
     "redoc",
     "openapi.json",
@@ -54,6 +62,23 @@ async def lifespan(app: FastAPI):
     """Initialize shared services at startup and clean them up at shutdown."""
     paths = AppPaths.from_default_locations()
     paths.ensure_exists()
+    backend_log_path = configure_backend_logging(paths)
+
+    backend_runtime_mode = os.getenv(BACKEND_RUNTIME_MODE_ENV_VAR, "unknown")
+    launcher_log_path = os.getenv(
+        LAUNCHER_LOG_PATH_ENV_VAR,
+        str(paths.launcher_log_path),
+    )
+
+    logging.getLogger(__name__).info(
+        "Backend lifespan startup app_root=%s code_root=%s runtime_mode=%s "
+        "launcher_log_path=%s backend_log_path=%s",
+        paths.app_root,
+        paths.code_root,
+        backend_runtime_mode,
+        launcher_log_path,
+        backend_log_path,
+    )
 
     runtime_controller = RuntimeController(paths)
     setup_service = SetupService(paths, runtime_controller)
@@ -62,10 +87,15 @@ async def lifespan(app: FastAPI):
     app.state.paths = paths
     app.state.runtime_controller = runtime_controller
     app.state.setup_service = setup_service
+    app.state.backend_runtime_mode = backend_runtime_mode
+    app.state.launcher_log_path = launcher_log_path
+    app.state.backend_log_path = str(backend_log_path)
+    app.state.document_upload_count = 0
 
     try:
         yield
     finally:
+        logging.getLogger(__name__).info("Backend lifespan shutdown.")
         runtime_controller.close()
 
 

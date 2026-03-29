@@ -17,7 +17,13 @@ from textwrap import dedent
 import uvicorn
 import webview
 
-from src.app.paths import APP_ROOT_ENV_VAR, CODE_ROOT_ENV_VAR, AppPaths
+from src.app.paths import (
+    APP_ROOT_ENV_VAR,
+    BACKEND_RUNTIME_MODE_ENV_VAR,
+    CODE_ROOT_ENV_VAR,
+    LAUNCHER_LOG_PATH_ENV_VAR,
+    AppPaths,
+)
 from src.app.python_runtime import (
     hidden_windows_subprocess_kwargs,
     python_executable_is_usable,
@@ -29,6 +35,7 @@ from src.app.runtime_state import load_managed_app_config
 HOST = "127.0.0.1"
 PORT = 8000
 HEALTH_URL = f"http://{HOST}:{PORT}/healthz"
+READY_URL = f"http://{HOST}:{PORT}/readyz"
 APP_URL = f"http://{HOST}:{PORT}/"
 
 
@@ -258,12 +265,26 @@ class BackendProcess:
         self._log_stream = None
         self._server: uvicorn.Server | None = None
         self._server_thread: Thread | None = None
+        self._startup_probe_url = HEALTH_URL
+        self._open_log_stream()
+
+    def _open_log_stream(self) -> None:
+        """Open the persistent launcher log stream for the process lifetime."""
+        if self._log_stream is not None:
+            return
+        self._paths.logs_dir.mkdir(parents=True, exist_ok=True)
+        self._log_stream = self._paths.launcher_log_path.open(
+            "a",
+            encoding="utf-8",
+            buffering=1,
+        )
 
     def _append_log(self, message: str) -> None:
         """Append one launcher event to the packaged launcher log."""
-        self._paths.logs_dir.mkdir(parents=True, exist_ok=True)
-        with self._paths.launcher_log_path.open("a", encoding="utf-8") as log_file:
-            log_file.write(f"[{time.strftime('%Y-%m-%d %H:%M:%S')}] {message}\n")
+        self._open_log_stream()
+        assert self._log_stream is not None
+        self._log_stream.write(f"[{time.strftime('%Y-%m-%d %H:%M:%S')}] {message}\n")
+        self._log_stream.flush()
 
     def start(self) -> None:
         """Start the backend process if it is not already running."""
@@ -274,9 +295,30 @@ class BackendProcess:
 
         runtime_config = load_managed_app_config(self._paths.runtime_config_path)
         managed_python = self._paths.managed_venv_dir / "Scripts" / "python.exe"
+        packaging_mode = "frozen" if getattr(sys, "frozen", False) else "source"
+        self._startup_probe_url = (
+            READY_URL if runtime_config.install_state == "ready" else HEALTH_URL
+        )
+        self._append_log(
+            "Launcher startup "
+            f"app_root={self._paths.app_root} "
+            f"code_root={self._paths.code_root} "
+            f"packaging_mode={packaging_mode} "
+            f"runtime_config_exists={self._paths.runtime_config_path.is_file()} "
+            f"setup_status_exists={self._paths.setup_status_path.is_file()} "
+            f"managed_python={managed_python} "
+            f"managed_python_exists={managed_python.is_file()} "
+            f"runtime_install_state={runtime_config.install_state} "
+            f"launcher_log_path={self._paths.launcher_log_path} "
+            f"startup_probe_url={self._startup_probe_url}"
+        )
         if runtime_config.install_state == "ready" and managed_python.is_file():
             usable, detail = python_executable_is_usable(managed_python)
             if usable:
+                self._append_log(
+                    "Selected backend runtime_mode=managed_subprocess "
+                    f"managed_python={managed_python}"
+                )
                 self._start_managed_subprocess(managed_python)
                 return
 
@@ -285,12 +327,15 @@ class BackendProcess:
                 f"server. Detail: {detail or 'unknown error'}"
             )
 
+        self._append_log("Selected backend runtime_mode=embedded")
         self._start_embedded_server()
 
     def _start_embedded_server(self) -> None:
         """Run the bootstrap backend in-process for first-run setup."""
         os.environ[APP_ROOT_ENV_VAR] = str(self._paths.app_root)
         os.environ[CODE_ROOT_ENV_VAR] = str(self._paths.code_root)
+        os.environ[BACKEND_RUNTIME_MODE_ENV_VAR] = "embedded"
+        os.environ[LAUNCHER_LOG_PATH_ENV_VAR] = str(self._paths.launcher_log_path)
         if str(self._paths.code_root) not in sys.path:
             sys.path.insert(0, str(self._paths.code_root))
 
@@ -312,22 +357,20 @@ class BackendProcess:
 
     def _start_managed_subprocess(self, backend_python: Path) -> None:
         """Start the managed backend process from the provisioned venv."""
-        self._paths.logs_dir.mkdir(parents=True, exist_ok=True)
-        log_path = self._paths.launcher_log_path
+        self._open_log_stream()
+        assert self._log_stream is not None
         env = sanitized_subprocess_env(
             {
                 APP_ROOT_ENV_VAR: str(self._paths.app_root),
                 CODE_ROOT_ENV_VAR: str(self._paths.code_root),
+                BACKEND_RUNTIME_MODE_ENV_VAR: "managed_subprocess",
+                LAUNCHER_LOG_PATH_ENV_VAR: str(self._paths.launcher_log_path),
             }
         )
-
-        with log_path.open("a", encoding="utf-8") as log_file:
-            log_file.write(
-                f"\n[{time.strftime('%Y-%m-%d %H:%M:%S')}] Starting backend with {backend_python}\n"
-            )
-
-
-        self._log_stream = log_path.open("a", encoding="utf-8")
+        self._append_log(
+            "Starting backend subprocess "
+            f"python={backend_python} cwd={self._paths.code_root}"
+        )
         self._process = subprocess.Popen(
             [
                 str(backend_python),
@@ -348,8 +391,10 @@ class BackendProcess:
         )
 
     def wait_until_ready(self, *, timeout_seconds: int = 90) -> None:
-        """Block until the backend health endpoint is ready."""
+        """Block until the selected backend startup probe is ready."""
         deadline = time.time() + timeout_seconds
+        probe_url = self._startup_probe_url
+        last_probe_detail = "no readiness response received"
         while time.time() < deadline:
             if self._server_thread is not None and not self._server_thread.is_alive():
                 raise RuntimeError("Embedded backend thread exited early.")
@@ -359,15 +404,33 @@ class BackendProcess:
                 )
 
             try:
-                with urllib.request.urlopen(HEALTH_URL, timeout=2) as response:
+                with urllib.request.urlopen(probe_url, timeout=2) as response:
                     if response.status == 200:
+                        self._append_log(
+                            f"Backend startup probe succeeded url={probe_url}"
+                        )
                         return
-            except (urllib.error.URLError, TimeoutError):
-                pass
+                    last_probe_detail = (
+                        f"unexpected startup probe status={response.status} url={probe_url}"
+                    )
+            except urllib.error.HTTPError as exc:
+                body = exc.read().decode("utf-8", errors="replace").strip()
+                last_probe_detail = (
+                    f"http_error status={exc.code} url={probe_url} body={body[:800]}"
+                )
+            except (urllib.error.URLError, TimeoutError) as exc:
+                last_probe_detail = f"{type(exc).__name__}: {exc}"
 
             time.sleep(1)
 
-        raise TimeoutError("Backend did not become ready in time.")
+        self._append_log(
+            "Backend startup probe timed out "
+            f"url={probe_url} detail={last_probe_detail}"
+        )
+        raise TimeoutError(
+            "Backend did not become ready in time. "
+            f"Last startup probe result: {last_probe_detail}"
+        )
 
     def stop(self) -> None:
         """Stop the backend process if it is running."""
@@ -378,18 +441,16 @@ class BackendProcess:
             self._server = None
             self._server_thread = None
 
-        if self._process is None:
-            return
+        if self._process is not None:
+            if self._process.poll() is None:
+                self._process.terminate()
+                try:
+                    self._process.wait(timeout=20)
+                except subprocess.TimeoutExpired:
+                    self._process.kill()
+                    self._process.wait(timeout=10)
+            self._process = None
 
-        if self._process.poll() is None:
-            self._process.terminate()
-            try:
-                self._process.wait(timeout=20)
-            except subprocess.TimeoutExpired:
-                self._process.kill()
-                self._process.wait(timeout=10)
-
-        self._process = None
         if self._log_stream is not None:
             self._log_stream.close()
             self._log_stream = None
@@ -404,7 +465,9 @@ def main() -> None:
     """Start the backend and host the UI in a desktop shell."""
     os.environ.setdefault(CODE_ROOT_ENV_VAR, str(_resolve_code_root()))
     paths = AppPaths.from_default_locations()
+    paths.ensure_exists()
     backend = BackendProcess(paths)
+    backend._append_log("Launcher main initialized.")
     atexit.register(backend.stop)
 
     window = webview.create_window(
@@ -440,4 +503,3 @@ def main() -> None:
 
 if __name__ == "__main__":
     main()
-

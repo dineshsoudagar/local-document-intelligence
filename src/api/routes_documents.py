@@ -10,7 +10,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import TYPE_CHECKING
 
-from fastapi import APIRouter, Depends, File, HTTPException, UploadFile, status
+from fastapi import APIRouter, Depends, File, HTTPException, Request, UploadFile, status
 
 from src.api.app_state import (
     get_app_paths_from_state,
@@ -58,6 +58,35 @@ def _utc_now_iso() -> str:
 def _build_managed_document_path(paths: AppPaths, doc_id: str, suffix: str) -> Path:
     """Return the managed storage path for a document."""
     return paths.documents_dir / f"{doc_id}{suffix.lower()}"
+
+
+def _next_process_counter(request: Request, attribute_name: str) -> int:
+    """Increment and return one per-process request counter stored on app state."""
+    current_value = int(getattr(request.app.state, attribute_name, 0)) + 1
+    setattr(request.app.state, attribute_name, current_value)
+    return current_value
+
+
+def _index_diagnostic_snapshot(index_service: "IndexService") -> dict[str, str | bool | None]:
+    """Return parser warmup diagnostics when the index service exposes them."""
+    snapshot_getter = getattr(index_service, "parser_warmup_snapshot", None)
+    if callable(snapshot_getter):
+        snapshot = snapshot_getter()
+        return {
+            "parser_warmup_ran_in_process": snapshot.get("parser_warmup_ran_in_process"),
+            "parser_warmup_started_at": snapshot.get("parser_warmup_started_at"),
+            "parser_warmup_completed_at": snapshot.get("parser_warmup_completed_at"),
+            "parser_warmup_completed": snapshot.get("parser_warmup_completed"),
+            "parser_warmup_error": snapshot.get("parser_warmup_error"),
+        }
+
+    return {
+        "parser_warmup_ran_in_process": None,
+        "parser_warmup_started_at": None,
+        "parser_warmup_completed_at": None,
+        "parser_warmup_completed": None,
+        "parser_warmup_error": None,
+    }
 
 
 @router.get("/documents", response_model=DocumentsListResponse)
@@ -239,6 +268,7 @@ def delete_document(
 
 @router.post("/documents/upload", response_model=DocumentIngestResponse)
 def upload_document(
+    request: Request,
     file: UploadFile = File(...),
     registry: DocumentRegistry = Depends(get_document_registry_from_state),
     paths: AppPaths = Depends(get_app_paths_from_state),
@@ -264,7 +294,23 @@ def upload_document(
     temp_dir.mkdir(parents=True, exist_ok=True)
 
     temp_path: Path | None = None
+    managed_path: Path | None = None
     doc_id: str | None = None
+    upload_sequence = _next_process_counter(request, "document_upload_count")
+    is_first_upload = upload_sequence == 1
+    diagnostics = _index_diagnostic_snapshot(index_service)
+    file_size_bytes: int | None = None
+
+    logger.info(
+        "document_upload_start upload_sequence=%s first_upload=%s filename=%s "
+        "parser_warmup_completed=%s parser_warmup_completed_at=%s parser_warmup_error=%s",
+        upload_sequence,
+        is_first_upload,
+        original_filename,
+        diagnostics["parser_warmup_completed"],
+        diagnostics["parser_warmup_completed_at"],
+        diagnostics["parser_warmup_error"],
+    )
 
     try:
         with tempfile.NamedTemporaryFile(
@@ -278,10 +324,20 @@ def upload_document(
 
         file_hash = _compute_file_hash(temp_path)
         doc_id = _build_doc_id(file_hash)
+        file_size_bytes = temp_path.stat().st_size
 
         existing = registry.get_document(doc_id)
         if existing is not None:
             temp_path.unlink(missing_ok=True)
+            logger.info(
+                "document_upload_deduplicated upload_sequence=%s first_upload=%s doc_id=%s "
+                "stored_path=%s file_size_bytes=%s",
+                upload_sequence,
+                is_first_upload,
+                doc_id,
+                existing.stored_path,
+                file_size_bytes,
+            )
             return DocumentIngestResponse(
                 message="Document already registered.",
                 deduplicated=True,
@@ -294,6 +350,20 @@ def upload_document(
             suffix=suffix,
         )
         temp_path.replace(managed_path)
+        file_size_bytes = managed_path.stat().st_size
+
+        logger.info(
+            "document_upload_pre_index upload_sequence=%s first_upload=%s doc_id=%s "
+            "managed_path=%s file_size_bytes=%s parser_warmup_completed=%s "
+            "parser_warmup_ran_in_process=%s",
+            upload_sequence,
+            is_first_upload,
+            doc_id,
+            managed_path,
+            file_size_bytes,
+            diagnostics["parser_warmup_completed"],
+            diagnostics["parser_warmup_ran_in_process"],
+        )
 
         registry.create_document(
             doc_id=doc_id,
@@ -319,8 +389,31 @@ def upload_document(
             chunk_count=chunk_count,
             indexed_at=_utc_now_iso(),
         )
+        logger.info(
+            "document_upload_success upload_sequence=%s first_upload=%s doc_id=%s "
+            "managed_path=%s file_size_bytes=%s chunk_count=%s parser_warmup_completed=%s",
+            upload_sequence,
+            is_first_upload,
+            doc_id,
+            managed_path,
+            file_size_bytes,
+            chunk_count,
+            diagnostics["parser_warmup_completed"],
+        )
     except Exception as exc:
-        logger.exception("Document upload indexing failed for doc_id=%s path=%s", doc_id, managed_path)
+        logger.exception(
+            "document_upload_indexing_failed upload_sequence=%s first_upload=%s doc_id=%s "
+            "managed_path=%s file_size_bytes=%s parser_warmup_completed=%s "
+            "parser_warmup_error=%s error=%s",
+            upload_sequence,
+            is_first_upload,
+            doc_id,
+            managed_path,
+            file_size_bytes,
+            diagnostics["parser_warmup_completed"],
+            diagnostics["parser_warmup_error"],
+            exc,
+        )
         registry.mark_failed(doc_id=doc_id, error_message=str(exc))
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,

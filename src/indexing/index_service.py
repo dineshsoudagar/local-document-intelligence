@@ -3,9 +3,11 @@
 from __future__ import annotations
 
 import hashlib
+import logging
 import os
 import tempfile
 import time
+from datetime import datetime, timezone
 from pathlib import Path
 
 from docling.datamodel.base_models import InputFormat
@@ -18,6 +20,14 @@ from src.parser.text_chunk import ParsedChunk
 from src.retrieval.qdrant_hybrid_index import QdrantHybridIndex
 from src.utils.io import resolve_pdf_path
 from src.config.generator_config import GeneratorConfig
+
+logger = logging.getLogger(__name__)
+
+
+def _utc_now_iso() -> str:
+    """Return the current UTC timestamp in ISO-8601 format."""
+    return datetime.now(timezone.utc).isoformat()
+
 
 class IndexService:
     """Manage document ingestion and index lifecycle."""
@@ -53,11 +63,50 @@ class IndexService:
         )
         self._generator_config = resolved_generator_config
         self._parser_warmed_up = False
+        self._parser_warmup_ran_in_process = False
+        self._parser_warmup_started_at: str | None = None
+        self._parser_warmup_completed_at: str | None = None
+        self._parser_warmup_error: str | None = None
 
     @property
     def index(self) -> QdrantHybridIndex:
         """Expose the underlying index for querying."""
         return self._index
+
+    @property
+    def parser_warmup_ran_in_process(self) -> bool:
+        """Return whether parser warmup was attempted in the current process."""
+        return self._parser_warmup_ran_in_process
+
+    @property
+    def parser_warmup_started_at(self) -> str | None:
+        """Return the parser warmup start time."""
+        return self._parser_warmup_started_at
+
+    @property
+    def parser_warmup_completed_at(self) -> str | None:
+        """Return the parser warmup completion time."""
+        return self._parser_warmup_completed_at
+
+    @property
+    def parser_warmup_error(self) -> str | None:
+        """Return the last parser warmup error, if any."""
+        return self._parser_warmup_error
+
+    @property
+    def parser_warmup_completed(self) -> bool:
+        """Return whether parser warmup completed successfully."""
+        return self._parser_warmed_up
+
+    def parser_warmup_snapshot(self) -> dict[str, str | bool | None]:
+        """Return parser warmup diagnostics for health/debug endpoints."""
+        return {
+            "parser_warmup_ran_in_process": self.parser_warmup_ran_in_process,
+            "parser_warmup_started_at": self.parser_warmup_started_at,
+            "parser_warmup_completed_at": self.parser_warmup_completed_at,
+            "parser_warmup_completed": self.parser_warmup_completed,
+            "parser_warmup_error": self.parser_warmup_error,
+        }
 
     def ensure_pdf_indexed(self, pdf_path: str | Path) -> str:
         """Index one PDF if it is not already present."""
@@ -99,7 +148,6 @@ class IndexService:
         self._index.build(chunks=chunks, rebuild=False)
         return doc_id
 
-
     def clear(self) -> None:
         """Clear the entire index."""
         self._index.clear()
@@ -107,11 +155,23 @@ class IndexService:
     def warm_up_parser(self) -> None:
         """Prime lazy parser dependencies so the first real upload is not a cold start."""
         if self._parser_warmed_up:
+            logger.info(
+                "parser_warmup_skipped already_warmed_up=true completed_at=%s",
+                self._parser_warmup_completed_at,
+            )
             return
 
         fd, temp_path_str = tempfile.mkstemp(suffix=".pdf")
         os.close(fd)
         temp_path = Path(temp_path_str)
+        self._parser_warmup_ran_in_process = True
+        self._parser_warmup_started_at = _utc_now_iso()
+        self._parser_warmup_error = None
+        logger.info(
+            "parser_warmup_start path=%s started_at=%s",
+            temp_path,
+            self._parser_warmup_started_at,
+        )
 
         try:
             writer = PdfWriter()
@@ -121,8 +181,30 @@ class IndexService:
 
             self._parse_chunks(temp_path, "__warmup__")
             self._parser_warmed_up = True
+            self._parser_warmup_completed_at = _utc_now_iso()
+            logger.info(
+                "parser_warmup_complete path=%s completed_at=%s",
+                temp_path,
+                self._parser_warmup_completed_at,
+            )
+        except Exception as exc:
+            self._parser_warmup_error = str(exc)
+            self._parser_warmup_completed_at = None
+            logger.exception(
+                "parser_warmup_failed path=%s error=%s",
+                temp_path,
+                exc,
+            )
+            raise
         finally:
-            temp_path.unlink(missing_ok=True)
+            try:
+                temp_path.unlink(missing_ok=True)
+            except OSError as cleanup_exc:
+                logger.warning(
+                    "parser_warmup_temp_cleanup_failed path=%s error=%s",
+                    temp_path,
+                    cleanup_exc,
+                )
 
     @staticmethod
     def build_doc_id(pdf_path: str | Path) -> str:
@@ -136,14 +218,48 @@ class IndexService:
         """Parse one document into normalized chunks."""
         path = resolve_pdf_path(pdf_path)
         attempts = 1 + len(self._PARSE_RETRY_DELAYS_SECONDS)
+        is_warmup = doc_id == "__warmup__"
+        logger.info(
+            "parse_chunks_start doc_id=%s path=%s is_warmup=%s parser_warmup_completed=%s",
+            doc_id,
+            path,
+            is_warmup,
+            self.parser_warmup_completed,
+        )
 
         for attempt_index in range(attempts):
+            attempt_number = attempt_index + 1
             try:
-                return self._parser.parse(path, doc_id=doc_id)
+                chunks = self._parser.parse(path, doc_id=doc_id)
+                if attempt_number > 1:
+                    logger.info(
+                        "parse_chunks_success_after_retry doc_id=%s path=%s attempt=%s",
+                        doc_id,
+                        path,
+                        attempt_number,
+                    )
+                return chunks
             except Exception as exc:
-                if not self._should_retry_parse(exc, attempt_index=attempt_index):
+                should_retry = self._should_retry_parse(exc, attempt_index=attempt_index)
+                if not should_retry:
+                    logger.exception(
+                        "parse_chunks_failed doc_id=%s path=%s attempt=%s final_error=%s",
+                        doc_id,
+                        path,
+                        attempt_number,
+                        exc,
+                    )
                     raise
-                time.sleep(self._PARSE_RETRY_DELAYS_SECONDS[attempt_index])
+                retry_delay = self._PARSE_RETRY_DELAYS_SECONDS[attempt_index]
+                logger.warning(
+                    "parse_chunks_retry doc_id=%s path=%s attempt=%s error=%s delay_seconds=%.2f",
+                    doc_id,
+                    path,
+                    attempt_number,
+                    exc,
+                    retry_delay,
+                )
+                time.sleep(retry_delay)
 
         raise RuntimeError(f"Failed to parse document after {attempts} attempts: {path}")
 

@@ -12,6 +12,8 @@ from pathlib import Path
 APP_NAME = "LocalDocumentIntelligence"
 APP_ROOT_ENV_VAR = "LDI_APP_ROOT"
 CODE_ROOT_ENV_VAR = "LDI_CODE_ROOT"
+BACKEND_RUNTIME_MODE_ENV_VAR = "LDI_BACKEND_RUNTIME_MODE"
+LAUNCHER_LOG_PATH_ENV_VAR = "LDI_LAUNCHER_LOG_PATH"
 
 
 def _can_prepare_directory(path: Path) -> bool:
@@ -158,6 +160,11 @@ class AppPaths:
     def launcher_log_path(self) -> Path:
         """Return the desktop launcher log file."""
         return self.logs_dir / "launcher.log"
+
+    @property
+    def backend_log_path(self) -> Path:
+        """Return the backend diagnostic log file."""
+        return self.logs_dir / "backend.log"
 
     @property
     def documents_db_path(self) -> Path:

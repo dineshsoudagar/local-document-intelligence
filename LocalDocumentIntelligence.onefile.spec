@@ -1,19 +1,21 @@
 # -*- mode: python ; coding: utf-8 -*-
 from pathlib import Path
 
-from PyInstaller.utils.hooks import collect_submodules, copy_metadata
+from PyInstaller.utils.hooks import collect_data_files, collect_submodules, copy_metadata
 
 
 project_root = Path(SPECPATH).resolve()
-hiddenimports = collect_submodules("webview")
+hiddenimports = collect_submodules("webview") + collect_submodules("docling.models.plugins")
 metadata_datas = []
 for distribution_name in (
     "docling",
     "docling-core",
     "docling-ibm-models",
     "docling-parse",
+    "rapidocr",
 ):
     metadata_datas += copy_metadata(distribution_name)
+package_datas = collect_data_files("docling_parse") + collect_data_files("rapidocr")
 
 
 a = Analysis(
@@ -27,7 +29,7 @@ a = Analysis(
         (str(project_root / "src"), "src"),
         (str(project_root / "requirements.txt"), "."),
         (str(project_root / "requirements-launcher.txt"), "."),
-    ] + metadata_datas,
+    ] + metadata_datas + package_datas,
     hiddenimports=hiddenimports,
     hookspath=[],
     hooksconfig={},

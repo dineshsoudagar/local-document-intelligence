@@ -21,6 +21,11 @@ def _get_runtime_controller(request: Request) -> RuntimeController:
     return request.app.state.runtime_controller
 
 
+def get_runtime_controller_from_state(request: Request) -> RuntimeController:
+    """Return the shared runtime controller."""
+    return _get_runtime_controller(request)
+
+
 def _require_runtime_services(request: Request):
     """Return live runtime services or raise a setup-required error."""
     controller = _get_runtime_controller(request)
