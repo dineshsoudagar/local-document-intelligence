@@ -16,7 +16,7 @@ def write_json(data: Any, output_path: str | Path) -> None:
         json.dump(data, file, ensure_ascii=False, indent=2)
 
 
-def resolve_pdf_path(value: str) -> Path:
+def resolve_pdf_path(value: str | Path) -> Path:
     """Resolve one existing PDF file path."""
     path = Path(value).expanduser().resolve()
     if not path.exists() or not path.is_file():

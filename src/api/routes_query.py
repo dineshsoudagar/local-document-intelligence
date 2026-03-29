@@ -151,6 +151,7 @@ def query_documents(
     registry: DocumentRegistry = Depends(get_document_registry_from_state),
 ) -> QueryResponse:
     """Run a non-streaming grounded query and return the final answer payload."""
+    print(f"Received query: {request.query}, mode: {request.mode}, doc_ids: {request.doc_ids}, reasoning_mode: {request.reasoning_mode}")  # Debug log
     try:
         result = answer_service.answer(
             query=request.query,

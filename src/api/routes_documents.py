@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import hashlib
+import logging
 import shutil
 import tempfile
 from datetime import datetime, timezone
@@ -32,6 +33,7 @@ if TYPE_CHECKING:
 
 
 router = APIRouter()
+logger = logging.getLogger(__name__)
 
 
 def _compute_file_hash(path: Path) -> str:
@@ -139,6 +141,7 @@ def ingest_document(
             indexed_at=_utc_now_iso(),
         )
     except Exception as exc:
+        logger.exception("Document ingest indexing failed for doc_id=%s path=%s", doc_id, managed_path)
         registry.mark_failed(doc_id=doc_id, error_message=str(exc))
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
@@ -185,6 +188,7 @@ def reindex_document(
             indexed_at=_utc_now_iso(),
         )
     except Exception as exc:
+        logger.exception("Document reindex failed for doc_id=%s", doc_id)
         registry.mark_failed(doc_id=doc_id, error_message=str(exc))
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
@@ -316,6 +320,7 @@ def upload_document(
             indexed_at=_utc_now_iso(),
         )
     except Exception as exc:
+        logger.exception("Document upload indexing failed for doc_id=%s path=%s", doc_id, managed_path)
         registry.mark_failed(doc_id=doc_id, error_message=str(exc))
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,

@@ -286,19 +286,19 @@ class GroundedAnswerService:
             if second_pass_chunks:
                 retrieved_chunks = second_pass_chunks
 
-        resolved_mode, fallback_reason = self._resolve_mode(mode, retrieved_chunks)
+        #resolved_mode, fallback_reason = self._resolve_mode(mode, retrieved_chunks)
 
-        if resolved_mode == "chat":
-            return self._build_stream_response(
-                query=query,
-                mode_used="chat",
-                reasoning_mode=resolved_reasoning_mode,
-                context=self._empty_context(),
-                retrieved_chunk_count=len(retrieved_chunks),
-                retrieval_seconds=retrieval_seconds,
-                fallback_reason=fallback_reason,
-                stream_thinking=stream_thinking,
-            )
+        #if resolved_mode == "chat":
+        #    return self._build_stream_response(
+        #        query=query,
+        #        mode_used="chat",
+        ##        reasoning_mode=resolved_reasoning_mode,
+        #        context=self._empty_context(),
+        #        retrieved_chunk_count=len(retrieved_chunks),
+        #        retrieval_seconds=retrieval_seconds,
+        ##        fallback_reason=fallback_reason,
+         #       stream_thinking=stream_thinking,
+        #    )
 
         if not retrieved_chunks:
             start_payload = StreamStartPayload(

@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import logging
 from dataclasses import dataclass, replace
 
 from src.app.document_registry import DocumentRegistry
@@ -142,6 +143,13 @@ class RuntimeController:
             parser_config=parser_config,
             generator_config=generator_config,
         )
+        try:
+            index_service.warm_up_parser()
+        except Exception as exc:
+            logging.getLogger(__name__).warning(
+                "Parser warmup failed during runtime startup: %s",
+                exc,
+            )
 
         generator = LocalQwenGenerator(generator_config.generator_model_path, config=generator_config)
         answer_service = GroundedAnswerService(

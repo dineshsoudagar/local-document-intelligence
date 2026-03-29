@@ -3,23 +3,26 @@
 from __future__ import annotations
 
 import hashlib
+import os
+import tempfile
+import time
 from pathlib import Path
 
 from docling.datamodel.base_models import InputFormat
+from pypdf import PdfWriter
 
 from src.config.index_config import IndexConfig
 from src.config.parser_config import ParserConfig
-from src.indexing.macro_packet_builder import MacroPacketBuilder
 from src.parser.docling_parser import DoclingParser
 from src.parser.text_chunk import ParsedChunk
 from src.retrieval.qdrant_hybrid_index import QdrantHybridIndex
 from src.utils.io import resolve_pdf_path
 from src.config.generator_config import GeneratorConfig
-from src.indexing.macro_profiles import MacroPacketBundle, MacroSummaryBundle
-from src.indexing.macro_summary_service import MacroSummaryService
 
 class IndexService:
     """Manage document ingestion and index lifecycle."""
+
+    _PARSE_RETRY_DELAYS_SECONDS: tuple[float, ...] = (0.35, 0.9)
 
     def __init__(
         self,
@@ -27,9 +30,7 @@ class IndexService:
         index: QdrantHybridIndex | None = None,
         index_config: IndexConfig | None = None,
         parser_config: ParserConfig | None = None,
-        macro_packet_builder: MacroPacketBuilder | None = None,
         generator_config: GeneratorConfig | None = None,
-        macro_summary_service: MacroSummaryService | None = None,
     ) -> None:
         resolved_index_config = index_config or IndexConfig()
         resolved_parser_config = (
@@ -50,9 +51,8 @@ class IndexService:
         self._parser = DoclingParser(
             resolved_parser_config
         )
-        self._macro_packet_builder = macro_packet_builder or MacroPacketBuilder()
         self._generator_config = resolved_generator_config
-        self._macro_summary_service = macro_summary_service
+        self._parser_warmed_up = False
 
     @property
     def index(self) -> QdrantHybridIndex:
@@ -99,79 +99,30 @@ class IndexService:
         self._index.build(chunks=chunks, rebuild=False)
         return doc_id
 
-    def build_macro_packets(
-        self,
-        pdf_path: str | Path,
-        doc_id: str | None = None,
-    ) -> MacroPacketBundle:
-        """
-        Parse one PDF and build macro packets without indexing.
-
-        This is the bridge to the upcoming summary-generation stage.
-        It lets you inspect section grouping and packet quality before
-        wiring in summarization or storage.
-        """
-        path = resolve_pdf_path(pdf_path)
-        resolved_doc_id = doc_id or self.build_doc_id(path)
-        chunks = self._parse_chunks(path, resolved_doc_id)
-        return self._macro_packet_builder.build(chunks)
-
-    def parse_with_macro_packets(
-        self,
-        pdf_path: str | Path,
-        doc_id: str | None = None,
-    ) -> tuple[str, list[ParsedChunk], MacroPacketBundle]:
-        """
-        Parse one PDF once and return:
-        - resolved doc_id
-        - parsed chunks
-        - macro packet bundle
-
-        This method is the future integration point for:
-        parse -> macro summaries -> storage -> chunk indexing
-        """
-        path = resolve_pdf_path(pdf_path)
-        resolved_doc_id = doc_id or self.build_doc_id(path)
-        chunks = self._parse_chunks(path, resolved_doc_id)
-        packets = self._macro_packet_builder.build(chunks)
-        return resolved_doc_id, chunks, packets
-
-    def build_macro_summaries(
-        self,
-        pdf_path: str | Path,
-        doc_id: str | None = None,
-    ) -> MacroSummaryBundle:
-        """Parse one PDF, build macro packets, and summarize them."""
-        path = resolve_pdf_path(pdf_path)
-        resolved_doc_id = doc_id or self.build_doc_id(path)
-        chunks = self._parse_chunks(path, resolved_doc_id)
-        packets = self._macro_packet_builder.build(chunks)
-        return self._get_macro_summary_service().summarize_document(packets.document)
-
-    def parse_with_macro_summaries(
-        self,
-        pdf_path: str | Path,
-        doc_id: str | None = None,
-    ) -> tuple[str, list[ParsedChunk], MacroPacketBundle, MacroSummaryBundle]:
-        """Parse once and return chunks, packets, and generated macro summaries."""
-        path = resolve_pdf_path(pdf_path)
-        resolved_doc_id = doc_id or self.build_doc_id(path)
-        chunks = self._parse_chunks(path, resolved_doc_id)
-        packets = self._macro_packet_builder.build(chunks)
-        summaries = self._get_macro_summary_service().summarize_document(packets.document)
-        return resolved_doc_id, chunks, packets, summaries
-
-    def _get_macro_summary_service(self) -> MacroSummaryService:
-        """Return the macro summary service, creating it only when needed."""
-        if self._macro_summary_service is None:
-            self._macro_summary_service = MacroSummaryService.from_config(
-                self._generator_config
-            )
-        return self._macro_summary_service
 
     def clear(self) -> None:
         """Clear the entire index."""
         self._index.clear()
+
+    def warm_up_parser(self) -> None:
+        """Prime lazy parser dependencies so the first real upload is not a cold start."""
+        if self._parser_warmed_up:
+            return
+
+        fd, temp_path_str = tempfile.mkstemp(suffix=".pdf")
+        os.close(fd)
+        temp_path = Path(temp_path_str)
+
+        try:
+            writer = PdfWriter()
+            writer.add_blank_page(width=200, height=200)
+            with temp_path.open("wb") as file_handle:
+                writer.write(file_handle)
+
+            self._parse_chunks(temp_path, "__warmup__")
+            self._parser_warmed_up = True
+        finally:
+            temp_path.unlink(missing_ok=True)
 
     @staticmethod
     def build_doc_id(pdf_path: str | Path) -> str:
@@ -183,8 +134,36 @@ class IndexService:
 
     def _parse_chunks(self, pdf_path: str | Path, doc_id: str) -> list[ParsedChunk]:
         """Parse one document into normalized chunks."""
-        path = Path(pdf_path).resolve()
-        return self._parser.parse(path, doc_id=doc_id)
+        path = resolve_pdf_path(pdf_path)
+        attempts = 1 + len(self._PARSE_RETRY_DELAYS_SECONDS)
+
+        for attempt_index in range(attempts):
+            try:
+                return self._parser.parse(path, doc_id=doc_id)
+            except Exception as exc:
+                if not self._should_retry_parse(exc, attempt_index=attempt_index):
+                    raise
+                time.sleep(self._PARSE_RETRY_DELAYS_SECONDS[attempt_index])
+
+        raise RuntimeError(f"Failed to parse document after {attempts} attempts: {path}")
+
+    def _should_retry_parse(self, exc: Exception, *, attempt_index: int) -> bool:
+        """Return whether the parse failure looks transient enough to retry once more."""
+        if attempt_index >= len(self._PARSE_RETRY_DELAYS_SECONDS):
+            return False
+
+        if isinstance(exc, PermissionError):
+            return True
+
+        message = str(exc).lower()
+        transient_markers = (
+            "input document",
+            "is not valid",
+            "permission denied",
+            "temporarily unavailable",
+            "resource busy",
+        )
+        return any(marker in message for marker in transient_markers)
 
     def close(self) -> None:
         """Release index resources."""
