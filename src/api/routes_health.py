@@ -12,7 +12,7 @@ from src.api.app_state import (
 )
 from src.api.models_health import HealthResponse
 from src.app.paths import AppPaths
-from src.app.runtime_controller import RuntimeController
+from src.app.runtime_controller_like import RuntimeControllerLike
 from src.app.runtime_state import SetupStatus
 from src.app.setup_service import SetupService
 
@@ -24,7 +24,7 @@ def _build_health_details_payload(
     *,
     paths: AppPaths,
     setup_status: SetupStatus,
-    runtime_controller: RuntimeController,
+    runtime_controller: RuntimeControllerLike,
     runtime_mode: str,
     launcher_log_path: str,
     backend_log_path: str,
@@ -82,7 +82,7 @@ def health_details(
     request: Request,
     paths: AppPaths = Depends(get_app_paths_from_state),
     setup_service: SetupService = Depends(get_setup_service_from_state),
-    runtime_controller: RuntimeController = Depends(get_runtime_controller_from_state),
+    runtime_controller: RuntimeControllerLike = Depends(get_runtime_controller_from_state),
 ) -> dict[str, str | bool | None]:
     """Return the configured storage locations for diagnostics."""
     setup_status = setup_service.get_status()
@@ -108,7 +108,7 @@ def readyz(
     request: Request,
     paths: AppPaths = Depends(get_app_paths_from_state),
     setup_service: SetupService = Depends(get_setup_service_from_state),
-    runtime_controller: RuntimeController = Depends(get_runtime_controller_from_state),
+    runtime_controller: RuntimeControllerLike = Depends(get_runtime_controller_from_state),
 ) -> JSONResponse:
     """Return whether the backend is fully ready for the packaged launcher."""
     payload = _build_health_details_payload(

@@ -24,7 +24,7 @@ from src.app.python_runtime import (
     python_executable_is_usable,
     sanitized_subprocess_env,
 )
-from src.app.runtime_controller import RuntimeController
+from src.app.runtime_controller_like import RuntimeControllerLike
 from src.app.runtime_state import (
     ManagedAppConfig,
     SetupProgressItem,
@@ -88,7 +88,7 @@ OVERALL_MODEL_WEIGHT = 45
 class SetupService:
     """Manage first-run setup, background provisioning, and persisted status."""
 
-    def __init__(self, paths: AppPaths, runtime_controller: RuntimeController) -> None:
+    def __init__(self, paths: AppPaths, runtime_controller: RuntimeControllerLike) -> None:
         self._paths = paths
         self._runtime_controller = runtime_controller
         self._backend_runtime_mode = os.getenv(BACKEND_RUNTIME_MODE_ENV_VAR, "unknown")

@@ -8,7 +8,7 @@ from fastapi import HTTPException, Request, status
 
 from src.app.document_registry import DocumentRegistry
 from src.app.paths import AppPaths
-from src.app.runtime_controller import RuntimeController
+from src.app.runtime_controller_like import RuntimeControllerLike
 from src.app.setup_service import SetupService
 
 if TYPE_CHECKING:
@@ -16,12 +16,12 @@ if TYPE_CHECKING:
     from src.indexing.index_service import IndexService
 
 
-def _get_runtime_controller(request: Request) -> RuntimeController:
+def _get_runtime_controller(request: Request) -> RuntimeControllerLike:
     """Return the shared runtime controller."""
     return request.app.state.runtime_controller
 
 
-def get_runtime_controller_from_state(request: Request) -> RuntimeController:
+def get_runtime_controller_from_state(request: Request) -> RuntimeControllerLike:
     """Return the shared runtime controller."""
     return _get_runtime_controller(request)
 

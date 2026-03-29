@@ -372,7 +372,7 @@ class BackendProcess:
         if str(self._paths.code_root) not in sys.path:
             sys.path.insert(0, str(self._paths.code_root))
 
-        from src.api.main import app
+        from src.api.bootstrap_main import app
 
         config = uvicorn.Config(
             app,
@@ -642,3 +642,4 @@ def main() -> None:
 
 if __name__ == "__main__":
     main()
+

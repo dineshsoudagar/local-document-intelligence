@@ -1,21 +1,35 @@
 # -*- mode: python ; coding: utf-8 -*-
 from pathlib import Path
 
-from PyInstaller.utils.hooks import collect_data_files, collect_submodules, copy_metadata
+from PyInstaller.utils.hooks import collect_submodules
 
 
 project_root = Path(SPECPATH).resolve()
-hiddenimports = collect_submodules("webview") + collect_submodules("docling.models.plugins")
-metadata_datas = []
-for distribution_name in (
+hiddenimports = collect_submodules("webview")
+excluded_runtime_packages = [
+    "bitsandbytes",
+    "cv2",
     "docling",
-    "docling-core",
-    "docling-ibm-models",
-    "docling-parse",
+    "docling_core",
+    "docling_parse",
+    "fastembed",
+    "llvmlite",
+    "nltk",
+    "numba",
+    "onnxruntime",
+    "pandas",
+    "pypdfium2",
+    "pypdfium2_raw",
+    "qdrant_client",
     "rapidocr",
-):
-    metadata_datas += copy_metadata(distribution_name)
-package_datas = collect_data_files("docling_parse") + collect_data_files("rapidocr")
+    "scipy",
+    "sentence_transformers",
+    "sklearn",
+    "torch",
+    "torchaudio",
+    "torchvision",
+    "transformers",
+]
 
 
 a = Analysis(
@@ -29,12 +43,12 @@ a = Analysis(
         (str(project_root / "src"), "src"),
         (str(project_root / "requirements.txt"), "."),
         (str(project_root / "requirements-launcher.txt"), "."),
-    ] + metadata_datas + package_datas,
+    ],
     hiddenimports=hiddenimports,
     hookspath=[],
     hooksconfig={},
     runtime_hooks=[],
-    excludes=[],
+    excludes=excluded_runtime_packages,
     noarchive=False,
     optimize=0,
 )
