@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import hashlib
+import os
 import shutil
 import tempfile
 from datetime import datetime, timezone
@@ -270,6 +271,8 @@ def upload_document(
             delete=False,
         ) as temp_file:
             shutil.copyfileobj(file.file, temp_file)
+            temp_file.flush()
+            os.fsync(temp_file.fileno())
             temp_path = Path(temp_file.name)
 
         file_hash = _compute_file_hash(temp_path)

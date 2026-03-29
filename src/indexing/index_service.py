@@ -3,9 +3,12 @@
 from __future__ import annotations
 
 import hashlib
+import logging
+import time
 from pathlib import Path
 
 from docling.datamodel.base_models import InputFormat
+from docling.exceptions import ConversionError
 
 from src.config.index_config import IndexConfig
 from src.config.parser_config import ParserConfig
@@ -17,6 +20,12 @@ from src.utils.io import resolve_pdf_path
 from src.config.generator_config import GeneratorConfig
 from src.indexing.macro_profiles import MacroPacketBundle, MacroSummaryBundle
 from src.indexing.macro_summary_service import MacroSummaryService
+
+
+_INVALID_DOCUMENT_PARSE_RETRIES = 3
+_INVALID_DOCUMENT_PARSE_RETRY_BASE_DELAY_SECONDS = 0.25
+logger = logging.getLogger(__name__)
+
 
 class IndexService:
     """Manage document ingestion and index lifecycle."""
@@ -184,7 +193,49 @@ class IndexService:
     def _parse_chunks(self, pdf_path: str | Path, doc_id: str) -> list[ParsedChunk]:
         """Parse one document into normalized chunks."""
         path = Path(pdf_path).resolve()
-        return self._parser.parse(path, doc_id=doc_id)
+        for attempt in range(1, _INVALID_DOCUMENT_PARSE_RETRIES + 1):
+            try:
+                return self._parser.parse(path, doc_id=doc_id)
+            except ConversionError as exc:
+                if not self._should_retry_invalid_document_error(
+                    error=exc,
+                    path=path,
+                    attempt=attempt,
+                ):
+                    raise
+
+                delay_seconds = _INVALID_DOCUMENT_PARSE_RETRY_BASE_DELAY_SECONDS * attempt
+                logger.warning(
+                    "Docling rejected %s as invalid on parse attempt %s/%s; "
+                    "retrying in %.2fs.",
+                    path.name,
+                    attempt,
+                    _INVALID_DOCUMENT_PARSE_RETRIES,
+                    delay_seconds,
+                )
+                time.sleep(delay_seconds)
+
+        raise AssertionError("Document parse retry loop exited unexpectedly.")
+
+    @staticmethod
+    def _should_retry_invalid_document_error(
+        *,
+        error: ConversionError,
+        path: Path,
+        attempt: int,
+    ) -> bool:
+        """Return whether one transient Docling invalid-document error should retry."""
+        if attempt >= _INVALID_DOCUMENT_PARSE_RETRIES:
+            return False
+
+        message = str(error)
+        if "Input document" not in message or "is not valid." not in message:
+            return False
+
+        try:
+            return path.is_file() and path.stat().st_size > 0
+        except OSError:
+            return False
 
     def close(self) -> None:
         """Release index resources."""

@@ -1,11 +1,10 @@
 """Hybrid Qdrant index with dense retrieval, sparse retrieval, and reranking."""
 
 from __future__ import annotations
-
+from dataclasses import dataclass, replace
+from typing import Any, Sequence
 import uuid
-from dataclasses import dataclass
 from pathlib import Path
-from typing import Any
 
 from qdrant_client import QdrantClient, models
 
@@ -419,6 +418,45 @@ class QdrantHybridIndex:
                 max_length=self._config.reranker_max_length,
             )
         return self._reranker
+
+    def rerank_existing_chunks(
+        self,
+        query: str,
+        chunks: Sequence[RetrievedChunk],
+        *,
+        instruction: str | None = None,
+    ) -> list[RetrievedChunk]:
+        """Rerank an existing chunk set against one common query."""
+        if not chunks:
+            return []
+
+        reranker = self._get_reranker()
+        rerank_instruction = instruction or self._config.rerank_instruction
+        rerank_scores = reranker.score(
+            query=query,
+            documents=[chunk.text for chunk in chunks],
+            instruction=rerank_instruction,
+        )
+
+        if len(rerank_scores) != len(chunks):
+            raise RuntimeError(
+                "Reranker returned a mismatched number of scores: "
+                f"{len(rerank_scores)} != {len(chunks)}"
+            )
+
+        reranked = [
+            replace(
+                chunk,
+                rerank_score=score,
+                final_score=score,
+            )
+            for chunk, score in zip(chunks, rerank_scores)
+        ]
+        reranked.sort(
+            key=lambda item: (item.rerank_score, item.fused_score),
+            reverse=True,
+        )
+        return reranked
 
     def _resolve_blend_weights(self, rerank_scores: list[float]) -> tuple[float, float]:
         """Choose fusion and rerank weights from reranker score separation."""

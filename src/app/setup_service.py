@@ -647,21 +647,19 @@ class SetupService:
             self._download_selected_models(managed_python, config)
             self._check_cancel_requested()
 
-            save_managed_app_config(
+            ready_config = save_managed_app_config(
                 self._paths.runtime_config_path,
                 config.model_copy(update={"install_state": "ready"}),
             )
-            self._runtime_controller.reload()
-            self._write_status(
-                install_state="ready",
-                current_step="ready",
+            if not self._runtime_controller.reload():
+                raise RuntimeError(
+                    self._runtime_controller.last_error
+                    or "Runtime initialization failed after setup."
+                )
+
+            self._sync_ready_status(
+                ready_config,
                 progress_message="Runtime is ready.",
-                package_progress=100,
-                package_message="Managed runtime packages installed.",
-                last_error=None,
-                cancel_requested=False,
-                is_busy=False,
-                completed_at=utc_now_iso(),
             )
         except SetupCancelledError:
             save_managed_app_config(

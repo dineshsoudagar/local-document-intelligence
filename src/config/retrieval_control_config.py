@@ -50,20 +50,50 @@ class AutoControllerConfig:
 
 @dataclass(frozen=True, slots=True)
 class RewriteConfig:
-    """Configuration for retrieval-oriented query rewriting."""
+    """Configuration for retrieval-oriented query expansion."""
 
-    min_rewrites: int = 4
-    max_rewrites: int = 6
-    max_new_tokens: int = 192
+    min_rewrites: int = 10
+    max_rewrites: int = 10
+    max_new_tokens: int = 256
+    temperature: float = 0.50
+    top_p: float = 0.95
+    repetition_penalty: float = 1.05
+    reasoning_mode: str = "no_think"
     system_prompt: str = (
         "You generate retrieval probes for a document search system. "
         "Do not answer the question. Return only valid JSON."
     )
     user_instruction: str = (
-        "Include the original query as one rewrite. Produce concise search-friendly rewrites. "
-        "Vary across exact phrasing, paraphrase, likely keywords, section-oriented phrasing, "
-        "and explicit formulations. Do not produce duplicates or broad unrelated rewrites.\n\n"
+        "Include the original query as one rewrite. Generate concise retrieval rewrites with real semantic spread. "
+        "Most rewrites should add a new angle using synonyms, likely section names, domain terminology, related concepts, "
+        "abbreviations, constraints, or evidence-focused phrasing. Prefer document-language and search-language over natural "
+        "conversational rewording. Do not fill the list with simple paraphrases or reordered wording. Avoid duplicates, "
+        "near-duplicates, and unrelated expansions.\n\n"
         "Return JSON with fields: rewrites, keywords, entities."
+    )
+
+
+@dataclass(frozen=True, slots=True)
+class FocusedSecondPassConfig:
+    """Configuration for the bounded corrective retrieval pass."""
+
+    enabled: bool = False
+    retry_top_rerank_below: float = 0.40
+    retry_support_rerank_threshold: float = 0.32
+    retry_min_supporting_chunks: int = 2
+
+    top_k_per_rewrite: int = 10
+    final_top_k: int = 10
+
+    rerank_keep_threshold: float = 0.34
+    max_chunks_per_heading: int = 2
+    max_chunks_per_section: int = 1
+    max_chunks_per_document: int = 4
+
+    chunk_profiles: tuple[str, ...] = ("large",)
+    rerank_instruction: str = (
+        "Judge whether the document chunk adds missing context or broader evidence needed "
+        "to answer the user query."
     )
 
 
@@ -79,26 +109,6 @@ class RetrievalPassConfig:
     chunk_profiles: tuple[str, ...] = ("standard",)
     rerank_instruction: str = (
         "Judge whether the document chunk contains evidence that helps answer the user query faithfully."
-    )
-
-
-@dataclass(frozen=True, slots=True)
-class FocusedSecondPassConfig:
-    """Configuration for the bounded corrective retrieval pass."""
-
-    enabled: bool = True
-    max_refined_rewrites: int = 4
-    top_document_limit: int = 3
-    top_heading_limit: int = 4
-    chunk_profiles: tuple[str, ...] = ("large",)
-    top_k_per_rewrite: int = 12
-    global_top_k: int = 48
-    final_top_k: int = 12
-    max_chunks_per_heading: int = 3
-    max_chunks_per_page: int = 3
-    rerank_instruction: str = (
-        "Judge whether the document chunk adds missing context or broader evidence needed "
-        "to answer the user query."
     )
 
 
