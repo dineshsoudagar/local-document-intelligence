@@ -11,7 +11,7 @@ import time
 import urllib.error
 import urllib.request
 from pathlib import Path
-from threading import Thread
+from threading import Lock, Thread
 from textwrap import dedent
 
 import uvicorn
@@ -266,7 +266,13 @@ class BackendProcess:
         self._server: uvicorn.Server | None = None
         self._server_thread: Thread | None = None
         self._startup_probe_url = HEALTH_URL
+        self._runtime_mode = "stopped"
         self._open_log_stream()
+
+    @property
+    def runtime_mode(self) -> str:
+        """Return the currently active backend runtime mode."""
+        return self._runtime_mode
 
     def _open_log_stream(self) -> None:
         """Open the persistent launcher log stream for the process lifetime."""
@@ -288,6 +294,14 @@ class BackendProcess:
 
     def start(self) -> None:
         """Start the backend process if it is not already running."""
+        self._start_backend(require_managed=False)
+
+    def start_managed_only(self) -> None:
+        """Start the managed backend process without falling back to embedded mode."""
+        self._start_backend(require_managed=True)
+
+    def _start_backend(self, *, require_managed: bool) -> None:
+        """Start the backend process in the selected runtime mode."""
         if self._process is not None and self._process.poll() is None:
             return
         if self._server_thread is not None and self._server_thread.is_alive():
@@ -319,15 +333,34 @@ class BackendProcess:
                     "Selected backend runtime_mode=managed_subprocess "
                     f"managed_python={managed_python}"
                 )
+                self._runtime_mode = "managed_subprocess"
                 self._start_managed_subprocess(managed_python)
                 return
 
+            detail_message = detail or "unknown error"
+            if require_managed:
+                raise RuntimeError(
+                    "Managed runtime is not usable after setup. "
+                    f"Detail: {detail_message}"
+                )
+
             self._append_log(
                 "Managed runtime was not usable, falling back to embedded bootstrap "
-                f"server. Detail: {detail or 'unknown error'}"
+                f"server. Detail: {detail_message}"
+            )
+        elif require_managed:
+            if runtime_config.install_state != "ready":
+                raise RuntimeError(
+                    "Managed runtime is not marked ready yet. "
+                    f"Current install_state={runtime_config.install_state}."
+                )
+            raise RuntimeError(
+                "Managed runtime Python executable is missing. "
+                f"Expected '{managed_python}'."
             )
 
         self._append_log("Selected backend runtime_mode=embedded")
+        self._runtime_mode = "embedded"
         self._start_embedded_server()
 
     def _start_embedded_server(self) -> None:
@@ -455,6 +488,135 @@ class BackendProcess:
             self._log_stream.close()
             self._log_stream = None
 
+        self._runtime_mode = "stopped"
+
+
+class DesktopShellController:
+    """Own the desktop window and coordinate backend runtime handoffs."""
+
+    def __init__(self, paths: AppPaths) -> None:
+        self._paths = paths
+        self._backend = BackendProcess(paths)
+        self._window: webview.Window | None = None
+        self._handoff_lock = Lock()
+        self._handoff_in_progress = False
+
+    @property
+    def backend(self) -> BackendProcess:
+        """Return the managed backend process wrapper."""
+        return self._backend
+
+    def create_window(self) -> webview.Window:
+        """Create the desktop shell window with the JS bridge attached."""
+        self._window = webview.create_window(
+            title="Starting Local Document Intelligence",
+            html=_render_startup_html(),
+            width=1480,
+            height=980,
+            min_size=(1120, 760),
+            js_api=DesktopShellApi(self),
+        )
+        return self._window
+
+    def bootstrap_shell(self) -> None:
+        """Start the initial backend and load the app UI."""
+        window = self._require_window()
+        try:
+            window.load_html(
+                _render_startup_html(
+                    heading="Starting your local workspace",
+                    message="Preparing the local backend and runtime. The full app will open in this window once everything is ready.",
+                )
+            )
+            self._backend.start()
+            self._backend.wait_until_ready()
+            window.set_title("Local Document Intelligence")
+            window.load_url(APP_URL)
+        except Exception as exc:
+            self._backend.stop()
+            window.set_title("Local Document Intelligence - Startup issue")
+            window.load_html(_render_error_html(str(exc), self._paths.launcher_log_path))
+
+    def switch_to_managed_runtime(self) -> None:
+        """Restart the backend into the managed runtime within the same window."""
+        with self._handoff_lock:
+            if self._handoff_in_progress:
+                self._backend._append_log(
+                    "Managed runtime handoff requested while another handoff is already in progress."
+                )
+                return
+            if self._backend.runtime_mode == "managed_subprocess":
+                self._backend._append_log(
+                    "Managed runtime handoff requested but backend is already running in managed_subprocess mode."
+                )
+                return
+            self._handoff_in_progress = True
+
+        window = self._require_window()
+        current_mode = self._backend.runtime_mode
+        self._backend._append_log(
+            "Managed runtime handoff requested "
+            f"current_runtime_mode={current_mode}"
+        )
+
+        try:
+            window.load_html(
+                _render_startup_html(
+                    heading="Switching to managed runtime",
+                    message="Restarting the local backend inside the managed Python environment. This window will continue automatically.",
+                )
+            )
+            self._backend._append_log(
+                "Stopping current backend for managed runtime handoff."
+            )
+            self._backend.stop()
+            self._backend._append_log(
+                "Current backend stopped for managed runtime handoff."
+            )
+            self._backend._append_log(
+                "Starting managed backend for in-session handoff."
+            )
+            self._backend.start_managed_only()
+            self._backend.wait_until_ready()
+            self._backend._append_log(
+                "Managed runtime handoff succeeded "
+                f"runtime_mode={self._backend.runtime_mode}"
+            )
+            window.set_title("Local Document Intelligence")
+            window.load_url(APP_URL)
+        except Exception as exc:
+            self._backend._append_log(
+                f"Managed runtime handoff failed error={exc}"
+            )
+            self._backend.stop()
+            window.set_title("Local Document Intelligence - Startup issue")
+            window.load_html(_render_error_html(str(exc), self._paths.launcher_log_path))
+            raise
+        finally:
+            with self._handoff_lock:
+                self._handoff_in_progress = False
+
+    def stop(self) -> None:
+        """Stop the managed backend and release resources."""
+        self._backend.stop()
+
+    def _require_window(self) -> webview.Window:
+        """Return the desktop window once it has been created."""
+        if self._window is None:
+            raise RuntimeError("Desktop window is not initialized.")
+        return self._window
+
+
+class DesktopShellApi:
+    """Expose desktop-only actions to the frontend via pywebview."""
+
+    def __init__(self, controller: DesktopShellController) -> None:
+        self._controller = controller
+
+    def switchToManagedRuntime(self) -> None:
+        """Restart the packaged app backend into the managed runtime."""
+        self._controller.switch_to_managed_runtime()
+
 
 def _resolve_code_root() -> Path:
     """Return the launcher payload root."""
@@ -466,39 +628,16 @@ def main() -> None:
     os.environ.setdefault(CODE_ROOT_ENV_VAR, str(_resolve_code_root()))
     paths = AppPaths.from_default_locations()
     paths.ensure_exists()
-    backend = BackendProcess(paths)
-    backend._append_log("Launcher main initialized.")
-    atexit.register(backend.stop)
+    controller = DesktopShellController(paths)
+    controller.backend._append_log("Launcher main initialized.")
+    atexit.register(controller.stop)
 
-    window = webview.create_window(
-        title="Starting Local Document Intelligence",
-        html=_render_startup_html(),
-        width=1480,
-        height=980,
-        min_size=(1120, 760),
-    )
-
-    def bootstrap_shell() -> None:
-        try:
-            window.load_html(
-                _render_startup_html(
-                    heading="Starting your local workspace",
-                    message="Preparing the local backend and runtime. The full app will open in this window once everything is ready.",
-                )
-            )
-            backend.start()
-            backend.wait_until_ready()
-            window.set_title("Local Document Intelligence")
-            window.load_url(APP_URL)
-        except Exception as exc:
-            backend.stop()
-            window.set_title("Local Document Intelligence - Startup issue")
-            window.load_html(_render_error_html(str(exc), paths.launcher_log_path))
+    controller.create_window()
 
     try:
-        webview.start(bootstrap_shell, debug=False)
+        webview.start(controller.bootstrap_shell, debug=False)
     finally:
-        backend.stop()
+        controller.stop()
 
 
 if __name__ == "__main__":

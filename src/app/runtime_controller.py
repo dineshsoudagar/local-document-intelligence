@@ -48,6 +48,10 @@ class RuntimeController:
         """Return the last runtime initialization error."""
         return self._last_error
 
+    def clear_error(self) -> None:
+        """Drop any previously recorded runtime initialization error."""
+        self._last_error = None
+
     def is_ready(self) -> bool:
         """Return whether the heavyweight runtime is initialized."""
         return self._services is not None

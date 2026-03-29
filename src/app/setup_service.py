@@ -14,7 +14,11 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
-from src.app.paths import CODE_ROOT_ENV_VAR, AppPaths
+from src.app.paths import (
+    BACKEND_RUNTIME_MODE_ENV_VAR,
+    CODE_ROOT_ENV_VAR,
+    AppPaths,
+)
 from src.app.python_runtime import (
     hidden_windows_subprocess_kwargs,
     python_executable_is_usable,
@@ -87,6 +91,7 @@ class SetupService:
     def __init__(self, paths: AppPaths, runtime_controller: RuntimeController) -> None:
         self._paths = paths
         self._runtime_controller = runtime_controller
+        self._backend_runtime_mode = os.getenv(BACKEND_RUNTIME_MODE_ENV_VAR, "unknown")
         self._catalog = ModelCatalog(models_root="models")
         self._lock = threading.Lock()
         self._worker: threading.Thread | None = None
@@ -110,7 +115,11 @@ class SetupService:
         """Return the current persisted setup status."""
         status = load_setup_status(self._paths.setup_status_path)
         config = load_managed_app_config(self._paths.runtime_config_path)
-        if self._runtime_controller.last_error and config.install_state == "ready":
+        if (
+            self._runtime_controller.last_error
+            and config.install_state == "ready"
+            and not status.is_busy
+        ):
             status = status.with_updates(
                 install_state="failed",
                 current_step="runtime_init_failed",
@@ -121,7 +130,9 @@ class SetupService:
             save_setup_status(self._paths.setup_status_path, status)
             return status
 
-        if self._runtime_controller.is_ready() or config.install_state == "ready":
+        if self._runtime_controller.is_ready() or (
+            config.install_state == "ready" and not status.is_busy
+        ):
             if status.install_state != "ready" or status.is_busy:
                 status = status.with_updates(
                     install_state="ready",
@@ -398,6 +409,7 @@ class SetupService:
                 raise RuntimeError("Setup is already running.")
 
             self._runtime_controller.close()
+            self._runtime_controller.clear_error()
             persisted_config = save_managed_app_config(self._paths.runtime_config_path, config)
             status = SetupStatus(
                 install_state="installing",
@@ -504,11 +516,19 @@ class SetupService:
                 self._paths.runtime_config_path,
                 config.model_copy(update={"install_state": "ready"}),
             )
-            self._runtime_controller.reload()
+            if self._should_defer_runtime_reload_to_managed_handoff():
+                self._runtime_controller.close()
+                self._runtime_controller.clear_error()
+            else:
+                self._runtime_controller.reload()
             self._write_status(
                 install_state="ready",
                 current_step="ready",
-                progress_message="Runtime is ready.",
+                progress_message=(
+                    "Setup complete. Switching to the managed runtime..."
+                    if self._should_defer_runtime_reload_to_managed_handoff()
+                    else "Runtime is ready."
+                ),
                 package_progress=100,
                 package_message="Managed runtime packages installed.",
                 last_error=None,
@@ -762,6 +782,10 @@ class SetupService:
             self._paths.setup_status_path,
             self._normalize_status_progress(updated),
         )
+
+    def _should_defer_runtime_reload_to_managed_handoff(self) -> bool:
+        """Return whether packaged embedded setup should hand off instead of reloading locally."""
+        return getattr(sys, "frozen", False) and self._backend_runtime_mode == "embedded"
 
     def _cancel_requested(self) -> bool:
         """Return whether the persisted status requested cancellation."""

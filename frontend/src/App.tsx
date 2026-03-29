@@ -55,9 +55,19 @@ export default function App() {
   const [setupError, setSetupError] = useState<string | null>(null);
   const [isSetupLoading, setIsSetupLoading] = useState(true);
   const [isReconfiguringSetup, setIsReconfiguringSetup] = useState(false);
+  const [isRuntimeSwitching, setIsRuntimeSwitching] = useState(false);
+  const [setupHandoffRequested, setSetupHandoffRequested] = useState(false);
   const abortControllerRef = useRef<AbortController | null>(null);
+  const hasTriggeredManagedHandoffRef = useRef(false);
 
   const isRuntimeReady = setupStatus?.install_state === "ready";
+  const hasDesktopManagedHandoffApi =
+    typeof window !== "undefined" &&
+    typeof window.pywebview?.api?.switchToManagedRuntime === "function";
+  const shouldAutoSwitchToManagedRuntime =
+    hasDesktopManagedHandoffApi &&
+    setupHandoffRequested &&
+    setupStatus?.install_state === "ready";
 
   function updateMessage(
     messageId: string,
@@ -207,14 +217,53 @@ export default function App() {
   }, [setupStatus?.is_busy]);
 
   useEffect(() => {
-    if (setupStatus?.install_state !== "ready") {
+    if (
+      setupStatus?.install_state !== "ready" ||
+      isRuntimeSwitching ||
+      shouldAutoSwitchToManagedRuntime
+    ) {
       return;
     }
 
     if (documents.length === 0) {
       void loadDocuments();
     }
-  }, [setupStatus?.install_state]);
+  }, [setupStatus?.install_state, isRuntimeSwitching, shouldAutoSwitchToManagedRuntime]);
+
+  useEffect(() => {
+    if (!shouldAutoSwitchToManagedRuntime || hasTriggeredManagedHandoffRef.current) {
+      return;
+    }
+
+    hasTriggeredManagedHandoffRef.current = true;
+    setIsRuntimeSwitching(true);
+    setSetupError(null);
+    setQueryError(null);
+    setUploadError(null);
+
+    const desktopApi = window.pywebview?.api;
+    if (!desktopApi) {
+      hasTriggeredManagedHandoffRef.current = false;
+      setIsRuntimeSwitching(false);
+      return;
+    }
+
+    void desktopApi
+      .switchToManagedRuntime()
+      .then(() => {
+        setIsRuntimeSwitching(false);
+        setSetupHandoffRequested(false);
+      })
+      .catch((err) => {
+        hasTriggeredManagedHandoffRef.current = false;
+        setIsRuntimeSwitching(false);
+        setSetupError(
+          err instanceof Error
+            ? err.message
+            : "Failed to switch to the managed runtime.",
+        );
+      });
+  }, [shouldAutoSwitchToManagedRuntime]);
 
   useEffect(() => {
     function handleWindowClick() {
@@ -273,12 +322,16 @@ export default function App() {
     torch_variant: string;
   }) {
     setSetupError(null);
+    setSetupHandoffRequested(true);
+    hasTriggeredManagedHandoffRef.current = false;
     const nextStatus = await startSetup(payload);
     setSetupStatus(nextStatus);
   }
 
   async function handleRetrySetup() {
     setSetupError(null);
+    setSetupHandoffRequested(true);
+    hasTriggeredManagedHandoffRef.current = false;
     const nextStatus = await retrySetup();
     setSetupStatus(nextStatus);
   }
@@ -483,6 +536,14 @@ export default function App() {
 
   if (isSetupLoading) {
     return <div className="setup-loading">Loading desktop runtime setup...</div>;
+  }
+
+  if (isRuntimeSwitching || shouldAutoSwitchToManagedRuntime) {
+    return (
+      <div className="setup-loading">
+        Switching to the managed runtime...
+      </div>
+    );
   }
 
   if (!isRuntimeReady || isReconfiguringSetup) {
