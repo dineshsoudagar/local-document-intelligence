@@ -241,14 +241,23 @@ def reindex_document(
 def delete_document(
     doc_id: str,
     registry: DocumentRegistry = Depends(get_document_registry_from_state),
+    index_service: "IndexService" = Depends(get_index_service_from_state),
 ) -> DocumentDeleteResponse:
-    """Delete a managed document and remove its registry entry."""
+    """Delete a managed document, its indexed chunks, and its registry entry."""
     existing = registry.get_document(doc_id)
     if existing is None:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
             detail="Document not found.",
         )
+
+    try:
+        index_service.index.delete_document(doc_id)
+    except Exception as exc:
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Failed to delete indexed chunks: {exc}",
+        ) from exc
 
     managed_path = Path(existing.stored_path)
     try:
@@ -261,7 +270,7 @@ def delete_document(
 
     registry.delete_document(doc_id)
     return DocumentDeleteResponse(
-        message="Document deleted from registry.",
+        message="Document deleted.",
         doc_id=doc_id,
     )
 
