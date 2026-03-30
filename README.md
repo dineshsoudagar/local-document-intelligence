@@ -4,7 +4,6 @@ A fully local document intelligence system for building a private document works
 
 Documents stay on disk, retrieval runs against a local Qdrant index, and answer generation runs through locally loaded models. The system is designed for packaged end-user use as well as source-based local development.
 
-
 ---
 
 ## ✨ Features
@@ -16,8 +15,8 @@ Documents stay on disk, retrieval runs against a local Qdrant index, and answer 
 - 🧠 Generate grounded answers from local models
 - ⚡ Choose between smaller and larger Qwen model options based on hardware
 - 💾 Keep documents, indexes, and models local on disk
----
 
+<!--
 ## ⬇️ Latest Release
 
 - [Download the latest Windows EXE](#)
@@ -28,11 +27,13 @@ Documents stay on disk, retrieval runs against a local Qdrant index, and answer 
 - Added support for Qwen 0.6B and Qwen 1.7B
 - Broadened support across lower-memory, mid-range, and higher-end PCs
 - Added packaged Windows EXE distribution for easier installation
+-->
 
 ---
+
 ## 🧭 What the Product Does
 
-local-document-intelligence lets users build a private local document workspace and query it with grounded answers backed by retrieved evidence.
+Local Document Intelligence lets users build a private local document workspace and query it with grounded answers backed by retrieved evidence.
 
 It is designed to:
 
@@ -58,31 +59,17 @@ For full setup instructions, see [installation.md](installation.md).
 
 For packaged downloads, use the latest release page once published.
 
-Packaged Windows download:
-[Download the latest Windows EXE](#)
----
+<!--
+### ⬇️ Packaged Windows Download
 
+[Download the latest Windows EXE](#)
+-->
 
 ### ▶️ Run from source
 
 ```powershell
 powershell -ExecutionPolicy Bypass -File .\launch-app.ps1
 ```
----
-## Hardware Support
-
-This release is no longer positioned only for higher-VRAM machines.
-
-The setup flow now supports different PC classes through selectable runtime and loading options:
-
-- **CPU-only systems** via the `cpu_safe` preset
-- **Lower-memory GPU systems** via 4-bit loading
-- **Mid-range GPU systems** via 8-bit loading
-- **Higher-memory GPU systems** via standard loading
-
-That means the product can be configured for a much broader range of PCs instead of assuming a single hardware profile.
-
-Performance will still vary by machine. CPU-safe mode prioritizes compatibility over speed.
 
 ---
 
@@ -102,7 +89,7 @@ Performance will still vary by machine. CPU-safe mode prioritizes compatibility 
 - `Qwen/Qwen3-4B-Instruct-2507`  
   Best for stronger local setups with around 8 GB VRAM or better for a more comfortable experience.
 
-### Retrieval and Pipeline Models
+### 🔎 Retrieval and Pipeline Models
 
 - Dense embeddings: `Qwen/Qwen3-Embedding-0.6B`
 - Reranking: `Qwen/Qwen3-Reranker-0.6B`
@@ -128,7 +115,7 @@ All models are stored locally under `models/`.
 
 ---
 
-## Query Experience
+## 🔀 Query Experience
 
 The system supports three user-facing interaction patterns:
 
@@ -140,7 +127,7 @@ Auto mode decides whether a request should be handled as direct assistant chat o
 
 Chat mode skips retrieval and responds directly as a local assistant.
 
-### Grounded document answering
+### Grounded Document Answering
 
 Grounded mode retrieves evidence from the local index and produces a cited answer from the retrieved context.
 
@@ -148,7 +135,7 @@ In the UI, this can be used across the full corpus or restricted to selected doc
 
 ---
 
-## How It Works
+## ⚙️ How It Works
 
 At a high level, the system does the following:
 
@@ -164,7 +151,7 @@ At a high level, the system does the following:
 
 ---
 
-## Tech Stack
+## 🏗️ Tech Stack
 
 - Backend: FastAPI
 - Frontend: React
@@ -173,5 +160,3 @@ At a high level, the system does the following:
 - Parsing: Docling
 - Local models: Qwen embedding, reranker, and generator models
 - Packaged desktop release: PyInstaller one-file build
-
----
