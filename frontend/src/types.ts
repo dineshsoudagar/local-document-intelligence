@@ -93,6 +93,7 @@ export type SetupOption = {
   label: string;
   description?: string | null;
   size_hint?: string | null;
+  vram_hint?: string | null;
   repo_id?: string | null;
 };
 

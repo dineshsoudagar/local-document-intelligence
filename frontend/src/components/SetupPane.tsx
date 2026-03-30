@@ -32,48 +32,43 @@ type CurrentProgress = {
 function generatorRuntimeGuide(
   preset: GeneratorLoadPreset,
   options: SetupOptions | null,
-): { vramRange: string; recommendation: string } {
+): { memoryShift: string; recommendation: string } {
   const gpuName = options?.compute.gpu_name;
-  const gpuMemory = options?.compute.gpu_memory_gb;
   const isRecommended =
     options?.compute.recommended_generator_load_preset === preset.key;
-  const detectedGpu = gpuName
-    ? gpuMemory
-      ? `${gpuName} with ${gpuMemory} GB VRAM`
-      : gpuName
-    : null;
+  const detectedGpu = gpuName ?? "your detected GPU";
 
   switch (preset.key) {
     case "standard":
       return {
-        vramRange: "Best on 10 GB+ VRAM",
+        memoryShift: "Baseline VRAM usage",
         recommendation: isRecommended
-          ? `Recommended for ${detectedGpu ?? "your detected GPU"}. Highest quality and simplest loading path.`
-          : "Highest quality and simplest loading path when your GPU has comfortable VRAM headroom.",
+          ? `Recommended for ${detectedGpu}. Highest quality and simplest loading path.`
+          : "Highest quality and simplest loading path.",
       };
     case "bnb_8bit":
       return {
-        vramRange: "Good fit for 7 to 9 GB VRAM",
+        memoryShift: "~35% to 45% lower VRAM than standard",
         recommendation: isRecommended
-          ? `Recommended for ${detectedGpu ?? "your detected GPU"}. Good balance between memory usage and quality.`
-          : "Strong default for mid-range NVIDIA GPUs that need lower VRAM usage without a big quality drop.",
+          ? `Recommended for ${detectedGpu}. Moderate VRAM reduction with a smaller quality tradeoff than 4-bit.`
+          : "Moderate VRAM reduction with a smaller quality tradeoff than 4-bit.",
       };
     case "bnb_4bit":
       return {
-        vramRange: "Best fit for 4 to 6 GB VRAM",
+        memoryShift: "~55% to 65% lower VRAM than standard",
         recommendation: isRecommended
-          ? `Recommended for ${detectedGpu ?? "your detected GPU"}. Lowest VRAM path on CUDA, with some quality tradeoff.`
-          : "Use this for smaller NVIDIA GPUs where the standard loader may not fit in memory.",
+          ? `Recommended for ${detectedGpu}. Largest VRAM reduction on CUDA, with a bigger quality tradeoff.`
+          : "Largest VRAM reduction on CUDA, with a bigger quality tradeoff.",
       };
     case "cpu_safe":
       return {
-        vramRange: "GPU VRAM not required",
+        memoryShift: "No GPU VRAM required",
         recommendation:
           "Use this when CUDA is unavailable or the GPU is too small.",
       };
     default:
       return {
-        vramRange: preset.memory_hint,
+        memoryShift: preset.memory_hint,
         recommendation: preset.description,
       };
   }
@@ -92,6 +87,27 @@ function findOptionByKey<T extends { key: string }>(
 
 function formatSetupOptionLabel(option: SetupOption) {
   return option.size_hint ? `${option.label} · ${option.size_hint}` : option.label;
+}
+
+function formatGeneratorOptionLabel(option: SetupOption) {
+  return option.vram_hint ? `${option.label} · ${option.vram_hint}` : formatSetupOptionLabel(option);
+}
+
+function buildGeneratorOptionHelper(option: SetupOption | null) {
+  if (!option) {
+    return "Select a local generator.";
+  }
+
+  const parts = [option.description];
+  if (option.vram_hint) {
+    parts.push(`VRAM guide: ${option.vram_hint}.`);
+  }
+
+  if (!option.description && option.repo_id) {
+    parts.push(option.repo_id);
+  }
+
+  return parts.filter(Boolean).join(" ");
 }
 
 function formatProgressStateLabel(item: SetupProgressItem) {
@@ -474,8 +490,7 @@ export function SetupPane({
       label: "Generator model",
       value: generatorSelection?.label ?? "Generator not selected",
       detail:
-        generatorSelection?.description ??
-        generatorSelection?.repo_id ??
+        buildGeneratorOptionHelper(generatorSelection) ??
         "Model used for grounded answers and chat.",
     },
     {
@@ -490,8 +505,9 @@ export function SetupPane({
       label: "Generator runtime",
       value: presetSelection?.label ?? "Preset not selected",
       detail:
-        presetGuide?.recommendation ??
-        presetSelection?.description ??
+        presetGuide
+          ? `${presetGuide.memoryShift}. ${presetGuide.recommendation}`
+          : presetSelection?.description ??
         "Memory profile for the selected generator.",
     },
     {
@@ -513,7 +529,7 @@ export function SetupPane({
       label: "Suggested runtime",
       value: presetSelection?.label ?? "Select a runtime preset",
       detail:
-        presetGuide?.vramRange ??
+        presetGuide?.memoryShift ??
         "Recommended from the detected hardware profile.",
     },
   ];
@@ -587,13 +603,9 @@ export function SetupPane({
                 onChange={setGeneratorKey}
                 items={(options?.generator_models ?? []).map((option) => ({
                   value: option.key,
-                  label: formatSetupOptionLabel(option),
+                  label: formatGeneratorOptionLabel(option),
                 }))}
-                helper={
-                  generatorSelection?.description ??
-                  generatorSelection?.repo_id ??
-                  "Select a local generator."
-                }
+                helper={buildGeneratorOptionHelper(generatorSelection)}
               />
             </div>
 
@@ -621,7 +633,7 @@ export function SetupPane({
             <div className="setup-panel">
               <div className="setup-panel-header">
                 <h2>Generator runtime</h2>
-                <p>Pick the memory profile that best matches the available VRAM.</p>
+                <p>Choose the loading mode for the selected generator.</p>
               </div>
               <SetupSelectField
                 label="Runtime preset"
@@ -631,12 +643,12 @@ export function SetupPane({
                   const guide = generatorRuntimeGuide(preset, options);
                   return {
                     value: preset.key,
-                    label: `${preset.label} · ${guide.vramRange}`,
+                    label: `${preset.label} · ${guide.memoryShift}`,
                   };
                 })}
                 helper={
                   presetGuide
-                    ? `${presetGuide.recommendation} ${presetSelection?.description ?? ""}`
+                    ? `${presetGuide.memoryShift}. ${presetGuide.recommendation}`
                     : "Select a runtime preset."
                 }
               />
