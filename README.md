@@ -1,8 +1,9 @@
-# 📚 local-document-intelligence
+# 📚 Local Document Intelligence
 
 A fully local document intelligence system for building a private document workspace with persistent indexing, hybrid retrieval, reranking, and grounded answer generation over local models.
 
-Documents stay on disk, retrieval runs against a local Qdrant index, and answer generation runs through locally loaded models.
+Documents stay on disk, retrieval runs against a local Qdrant index, and answer generation runs through locally loaded models. The system is designed for packaged end-user use as well as source-based local development.
+
 
 ---
 
@@ -13,6 +14,33 @@ Documents stay on disk, retrieval runs against a local Qdrant index, and answer 
 - 🔎 Search across the full document corpus
 - 📑 Restrict search to a single selected document
 - 🧠 Generate grounded answers from local models
+- ⚡ Choose between smaller and larger Qwen model options based on hardware
+- 💾 Keep documents, indexes, and models local on disk
+---
+
+## ⬇️ Latest Release
+
+- [Download the latest Windows EXE](#)
+- [View the latest release notes](#)
+
+### ✨ Release Highlights
+
+- Added support for Qwen 0.6B and Qwen 1.7B
+- Broadened support across lower-memory, mid-range, and higher-end PCs
+- Added packaged Windows EXE distribution for easier installation
+
+---
+## 🧭 What the Product Does
+
+local-document-intelligence lets users build a private local document workspace and query it with grounded answers backed by retrieved evidence.
+
+It is designed to:
+
+- ingest and store documents locally
+- persist indexing across sessions
+- retrieve evidence from one document or the full corpus
+- rerank evidence before answer generation
+- generate answers with local models instead of cloud services
 
 ---
 
@@ -24,169 +52,126 @@ Documents stay on disk, retrieval runs against a local Qdrant index, and answer 
 
 ---
 
-## 🚀 Getting Started
+## 🚀 Installation
 
-### 📋 Requirements
+For full setup instructions, see [installation.md](installation.md).
 
-- Python 3.11 or newer
-- PowerShell
+For packaged downloads, use the latest release page once published.
 
-### 💻 Hardware
+Packaged Windows download:
+[Download the latest Windows EXE](#)
+---
 
-The current setup is aimed at machines with at least **8 GB VRAM** for a comfortable local run with the present model stack.
 
-This is not yet tuned for low-end PCs. Lower-memory support is planned in a later iteration.
-
-### ▶️ Run the application
-
-Start the app with:
+### ▶️ Run from source
 
 ```powershell
 powershell -ExecutionPolicy Bypass -File .\launch-app.ps1
 ```
+---
+## Hardware Support
 
-The launch script is expected to:
+This release is no longer positioned only for higher-VRAM machines.
 
-- create `./local_int_venv` if it does not already exist
-- install CUDA-enabled `torch` into that environment
-- install `requirements.txt`
-- download configured models into `./models` if missing
-- start the FastAPI app on `http://localhost:8000`
-- open the application in the browser
+The setup flow now supports different PC classes through selectable runtime and loading options:
+
+- **CPU-only systems** via the `cpu_safe` preset
+- **Lower-memory GPU systems** via 4-bit loading
+- **Mid-range GPU systems** via 8-bit loading
+- **Higher-memory GPU systems** via standard loading
+
+That means the product can be configured for a much broader range of PCs instead of assuming a single hardware profile.
+
+Performance will still vary by machine. CPU-safe mode prioritizes compatibility over speed.
 
 ---
 
-## 🔀 Query Modes
+## 🧠 Supported Models
 
-### 🤖 Auto
+### Generator Models
 
-Auto mode decides whether a query should be handled as normal assistant chat or as document-grounded retrieval.
+- `Qwen 0.6B`  
+  Best for CPU-only fallback and very low-memory systems. CPU-only use is supported, but not recommended for normal use because it will be slow.
 
-Use this when you do not want to manually choose between free chat and document search.
+- `Qwen 1.7B`  
+  Best for broader compatibility on lower-memory and mid-range machines.
 
-### 💬 Chat
+- `Qwen/Qwen3-4B`  
+  Best for balanced local use on machines with around 8 GB VRAM.
 
-Chat mode skips retrieval and answers directly as a local assistant.
+- `Qwen/Qwen3-4B-Instruct-2507`  
+  Best for stronger local setups with around 8 GB VRAM or better for a more comfortable experience.
 
-Use this for general interaction, system questions, or messages that do not require document evidence.
-
-### 🌐 Corpus
-
-Corpus mode searches across the full indexed knowledge base.
-
-Use this when the answer may be spread across multiple uploaded documents or when you want to search the entire local corpus.
-
-### 📄 Single Document
-
-Single document mode restricts retrieval to one selected document.
-
-Use this when you want the answer to come only from one document instead of the full corpus.
-
----
-
-## 🧠 Models
-
-Current default model stack:
+### Retrieval and Pipeline Models
 
 - Dense embeddings: `Qwen/Qwen3-Embedding-0.6B`
 - Reranking: `Qwen/Qwen3-Reranker-0.6B`
-- Answer generation: `Qwen/Qwen3-4B-Instruct-2507`
 - Sparse retrieval: `Qdrant/bm25`
+
+### 💻 Hardware Support
+
+The application is designed to support a broad range of PCs by allowing smaller and larger model choices.
+
+- Lower-end systems can use `Qwen 0.6B`
+- Mid-range systems are better suited for `Qwen 1.7B`
+- More capable systems can use the `4B` models for better answer quality
+
+CPU-only use is supported with the smaller model path, but it is mainly a compatibility option and will be noticeably slower.
+
+### ⚙️ Low-Memory Runtime Options
+
+Lower-memory setups can use configurable bitsandbytes loading options, including reduced-memory configurations such as 4-bit and 8-bit loading where enabled in the application setup.
+
+These options are intended to improve compatibility on constrained systems, with the usual tradeoff of reduced speed or output quality compared with stronger GPU setups.
 
 All models are stored locally under `models/`.
 
 ---
 
-## ⚙️ How It Works
+## Query Experience
 
-The system uses a local retrieval pipeline instead of a single vector lookup.
+The system supports three user-facing interaction patterns:
 
-At a high level, the flow is:
+### Auto
 
-1. Parse the uploaded document into chunks
-2. Store chunk text and metadata locally
+Auto mode decides whether a request should be handled as direct assistant chat or as document-grounded retrieval.
+
+### Chat
+
+Chat mode skips retrieval and responds directly as a local assistant.
+
+### Grounded document answering
+
+Grounded mode retrieves evidence from the local index and produces a cited answer from the retrieved context.
+
+In the UI, this can be used across the full corpus or restricted to selected documents.
+
+---
+
+## How It Works
+
+At a high level, the system does the following:
+
+1. Parse uploaded PDF documents into chunks
+2. Store document files and metadata locally
 3. Index chunks into a local Qdrant collection
 4. Retrieve candidates with dense and sparse search
 5. Fuse retrieval results
-6. Rerank the fused candidates
+6. Rerank fused candidates
 7. Build grounded context from the strongest evidence
-8. Judge whether the evidence is sufficient
-9. Generate either:
-   - a grounded supported answer
-   - or an unsupported response instead of guessing
+8. Generate a supported answer or decline unsupported claims instead of guessing
+9. Return citations, source references, and timing data
 
 ---
 
-## 🏗️ Tech Stack
+## Tech Stack
 
 - Backend: FastAPI
 - Frontend: React
+- Desktop shell: pywebview
 - Vector store: Qdrant
 - Parsing: Docling
 - Local models: Qwen embedding, reranker, and generator models
+- Packaged desktop release: PyInstaller one-file build
 
 ---
-
-## 🛠️ Frontend Development
-
-The built frontend is already used for normal application startup.
-
-Only rebuild the frontend if you are editing the UI.
-
-### 🔧 Run in development mode
-
-```powershell
-powershell -ExecutionPolicy Bypass -File .\launch-dev.ps1
-```
-
-This mode requires Node.js and npm because it runs the Vite development server.
-
-### 🏗️ Rebuild the frontend
-
-```powershell
-Set-Location .\frontend
-npm install
-npm run build
-Set-Location ..
-```
-
-This generates the production frontend under `frontend/dist`.
-
----
-
-## 📦 Installing Node.js
-
-Node.js and npm are only required when developing or rebuilding the frontend.
-
-On Windows, install the LTS version with:
-
-```powershell
-winget install OpenJS.NodeJS.LTS
-```
-
-Then verify:
-
-```powershell
-node -v
-npm -v
-```
-
-If `node` or `npm` is still not found, add the usual Node.js install paths to your user `PATH`.
-
-Restart the terminal and verify again:
-
-```powershell
-node -v
-npm -v
-```
-
----
-
-## 🔭 Planned Improvements
-
-- DOCX support
-- Image-aware document support
-- Better support for low-end PCs
-- Lower-memory runtime options
-- More packaging and deployment polish
-- Continued refinement of corpus and single-document workflows

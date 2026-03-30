@@ -499,7 +499,14 @@ class SetupService:
                     package_message="Installing optional bitsandbytes support...",
                 )
                 self._run_process(
-                    [str(managed_python), "-m", "pip", "install", "bitsandbytes"],
+                    [
+                        str(managed_python),
+                        "-m",
+                        "pip",
+                        "install",
+                        "--upgrade",
+                        "bitsandbytes",
+                    ],
                     cwd=self._paths.code_root,
                 )
                 self._check_cancel_requested()
@@ -799,7 +806,10 @@ class SetupService:
 
     def _should_defer_runtime_reload_to_managed_handoff(self) -> bool:
         """Return whether packaged embedded setup should hand off instead of reloading locally."""
-        return getattr(sys, "frozen", False) and self._backend_runtime_mode == "embedded"
+        return getattr(sys, "frozen", False) and self._backend_runtime_mode in {
+            "embedded",
+            "managed_subprocess",
+        }
 
     def _cancel_requested(self) -> bool:
         """Return whether the persisted status requested cancellation."""

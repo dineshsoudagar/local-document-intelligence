@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import gc
 from pathlib import Path
 
 import re
@@ -19,6 +20,43 @@ from transformers import (
 )
 
 from src.config.generator_config import GeneratorConfig
+
+
+def _best_effort_release_model(model: Any | None) -> None:
+    """Try to drop model state from the active device before releasing references."""
+    if model is None:
+        return
+
+    cpu_method = getattr(model, "cpu", None)
+    if callable(cpu_method):
+        try:
+            cpu_method()
+        except Exception:
+            pass
+
+    to_method = getattr(model, "to", None)
+    if callable(to_method):
+        try:
+            to_method("cpu")
+        except Exception:
+            pass
+
+
+def _release_torch_memory() -> None:
+    """Run best-effort Python and CUDA cleanup after model teardown."""
+    gc.collect()
+    if not torch.cuda.is_available():
+        return
+
+    try:
+        torch.cuda.empty_cache()
+    except Exception:
+        pass
+
+    try:
+        torch.cuda.ipc_collect()
+    except Exception:
+        pass
 
 @dataclass(slots=True)
 class GeneratedText:
@@ -90,6 +128,13 @@ class QwenDenseEmbedder:
             prompt_name="query",
         )
         return embedding[0].tolist()
+
+    def close(self) -> None:
+        """Release the embedding model and its device memory."""
+        model = self._model
+        self._model = None
+        _best_effort_release_model(model)
+        _release_torch_memory()
 
 
 class QwenReranker:
@@ -227,6 +272,14 @@ class QwenReranker:
         yes_no_logits = torch.stack([false_logits, true_logits], dim=1)
         probabilities = torch.softmax(yes_no_logits, dim=1)[:, 1]
         return probabilities.float().cpu().tolist()
+
+    def close(self) -> None:
+        """Release the reranker model and tokenizer references."""
+        model = self._model
+        self._model = None
+        self._tokenizer = None
+        _best_effort_release_model(model)
+        _release_torch_memory()
 
 def _resolve_torch_dtype(name: str) -> torch.dtype | None:
     mapping = {
@@ -881,3 +934,11 @@ class LocalQwenGenerator:
         if not isinstance(payload, dict):
             raise ValueError("Structured output must be a JSON object")
         return payload
+
+    def close(self) -> None:
+        """Release the generator model and tokenizer references."""
+        model = self._model
+        self._model = None
+        self._tokenizer = None
+        _best_effort_release_model(model)
+        _release_torch_memory()

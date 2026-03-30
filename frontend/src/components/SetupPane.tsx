@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import type {
   GeneratorLoadPreset,
   SetupOptions,
@@ -264,6 +264,7 @@ export function SetupPane({
   const [setupStep, setSetupStep] = useState<SetupStep>("configure");
   const [submitError, setSubmitError] = useState<string | null>(null);
   const [isSubmitting, setIsSubmitting] = useState(false);
+  const forceConfigureHandledRef = useRef(false);
 
   useEffect(() => {
     if (!options) {
@@ -323,8 +324,14 @@ export function SetupPane({
 
   useEffect(() => {
     if (forceConfigureStep) {
-      setSetupStep("configure");
+      if (!forceConfigureHandledRef.current) {
+        setSetupStep("configure");
+        forceConfigureHandledRef.current = true;
+      }
+      return;
     }
+
+    forceConfigureHandledRef.current = false;
   }, [forceConfigureStep]);
 
   useEffect(() => {
@@ -450,6 +457,11 @@ export function SetupPane({
       status.selected_generator_load_preset === generatorLoadPreset &&
       status.selected_torch_variant === torchVariant,
   );
+  const hasUnsavedSelectionChanges = Boolean(
+    status &&
+      !isBusy &&
+      !isSelectionSyncedWithStatus,
+  );
   const canRetry =
     setupStep === "review" &&
     status?.install_state === "failed" &&
@@ -539,7 +551,7 @@ export function SetupPane({
       <section className="setup-hero">
         <div className="setup-hero-top">
           <div className="setup-hero-copy">
-            <p className="setup-kicker">Desktop bootstrap setup</p>
+            <p className="setup-kicker">LOCAL DOCUMENT ASSISTANT SETUP</p>
             <h1>
               {setupStep === "configure"
                 ? "Choose the local runtime before opening the workspace."
@@ -690,7 +702,7 @@ export function SetupPane({
                   type="button"
                   className="setup-action-button secondary"
                   onClick={onReturnToWorkspace}
-                  disabled={isSubmitting}
+                  disabled={isSubmitting || hasUnsavedSelectionChanges}
                 >
                   Back to workspace
                 </button>
@@ -809,7 +821,7 @@ export function SetupPane({
                   type="button"
                   className="setup-action-button secondary"
                   onClick={onReturnToWorkspace}
-                  disabled={isSubmitting}
+                  disabled={isSubmitting || hasUnsavedSelectionChanges}
                 >
                   Back to workspace
                 </button>

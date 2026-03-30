@@ -577,11 +577,6 @@ class DesktopShellController:
                     "Managed runtime handoff requested while another handoff is already in progress."
                 )
                 return
-            if self._backend.runtime_mode == "managed_subprocess":
-                self._backend._append_log(
-                    "Managed runtime handoff requested but backend is already running in managed_subprocess mode."
-                )
-                return
             self._handoff_in_progress = True
 
         window = self._require_window()
@@ -594,8 +589,16 @@ class DesktopShellController:
         try:
             window.load_html(
                 _render_startup_html(
-                    heading="Switching to managed runtime",
-                    message="Restarting the local backend inside the managed Python environment. This window will continue automatically.",
+                    heading=(
+                        "Restarting managed runtime"
+                        if current_mode == "managed_subprocess"
+                        else "Switching to managed runtime"
+                    ),
+                    message=(
+                        "Restarting the local backend inside the managed Python environment so the updated runtime selection takes effect."
+                        if current_mode == "managed_subprocess"
+                        else "Restarting the local backend inside the managed Python environment. This window will continue automatically."
+                    ),
                 )
             )
             self._backend._append_log(
@@ -677,6 +680,7 @@ def main() -> None:
 
 if __name__ == "__main__":
     main()
+
 
 
 

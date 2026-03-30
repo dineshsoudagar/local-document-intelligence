@@ -440,6 +440,16 @@ class QdrantHybridIndex:
         return [(value - min_value) / scale for value in values]
 
     def close(self) -> None:
+        reranker = self._reranker
+        self._reranker = None
+        if reranker is not None:
+            reranker.close()
+
+        embedder = self._embedder
+        self._embedder = None
+        if embedder is not None:
+            embedder.close()
+
         self._client.close()
 
     def clear(self) -> None:

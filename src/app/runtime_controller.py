@@ -95,6 +95,11 @@ class RuntimeController:
         if self._services is None:
             return
 
+        answer_service = self._services.answer_service
+        close_method = getattr(answer_service, "close", None)
+        if callable(close_method):
+            close_method()
+
         index_service = self._services.index_service
         close_method = getattr(index_service, "close", None)
         if callable(close_method):

@@ -118,6 +118,14 @@ class GroundedAnswerService:
             self._generator = LocalQwenGenerator.from_config(self._config)
         return self._generator
 
+    def close(self) -> None:
+        """Release the loaded generator, if one is active."""
+        if self._generator is None:
+            return
+
+        self._generator.close()
+        self._generator = None
+
     def answer(
         self,
         query: str,
