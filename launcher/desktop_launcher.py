@@ -620,6 +620,9 @@ class DesktopShellApi:
 
 def _resolve_code_root() -> Path:
     """Return the launcher payload root."""
+    meipass = getattr(sys, "_MEIPASS", None)
+    if meipass:
+        return Path(meipass).resolve()
     return Path(__file__).resolve().parents[1]
 
 
@@ -642,4 +645,5 @@ def main() -> None:
 
 if __name__ == "__main__":
     main()
+
 
