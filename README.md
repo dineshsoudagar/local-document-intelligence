@@ -48,7 +48,7 @@ It is designed to:
 ## 🎬 Demo
 
 <p align="center">
-  <img src="data/demo.gif" alt="App UI Demo" width="90%" style="margin: 1%;" />
+  <img src="src/assests/demo.gif" alt="App UI Demo" width="90%" style="margin: 1%;" />
 </p>
 
 ---
