@@ -322,25 +322,44 @@ export default function App() {
     torch_variant: string;
   }) {
     setSetupError(null);
-    setSetupHandoffRequested(true);
+    setSetupHandoffRequested(false);
     hasTriggeredManagedHandoffRef.current = false;
     const nextStatus = await startSetup(payload);
     setSetupStatus(nextStatus);
+    if (nextStatus.install_state === "installing" || nextStatus.install_state === "ready") {
+      setSetupHandoffRequested(true);
+    }
   }
 
   async function handleRetrySetup() {
     setSetupError(null);
-    setSetupHandoffRequested(true);
+    setSetupHandoffRequested(false);
     hasTriggeredManagedHandoffRef.current = false;
     const nextStatus = await retrySetup();
     setSetupStatus(nextStatus);
+    if (nextStatus.install_state === "installing" || nextStatus.install_state === "ready") {
+      setSetupHandoffRequested(true);
+    }
   }
 
   async function handleCancelSetup() {
     setSetupError(null);
+    setSetupHandoffRequested(false);
+    hasTriggeredManagedHandoffRef.current = false;
     const nextStatus = await cancelSetup();
     setSetupStatus(nextStatus);
   }
+
+  useEffect(() => {
+    if (!setupHandoffRequested || !setupStatus || setupStatus.is_busy) {
+      return;
+    }
+
+    if (setupStatus.install_state !== "ready") {
+      setSetupHandoffRequested(false);
+      hasTriggeredManagedHandoffRef.current = false;
+    }
+  }, [setupHandoffRequested, setupStatus]);
 
   async function handleSubmit() {
     if (!isRuntimeReady) {

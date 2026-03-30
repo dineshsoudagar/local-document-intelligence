@@ -166,6 +166,16 @@ class RuntimeController:
         preset_key = config.selected_generator_load_preset or "standard"
         generator_config = generator_config.with_load_preset(preset_key)
 
+        logging.getLogger(__name__).info(
+            "Building runtime services generator_key=%s generator_path=%s "
+            "embedding_key=%s load_preset=%s torch_variant=%s",
+            pipeline_models.generator_key,
+            generator_config.generator_model_path,
+            pipeline_models.embedder_key,
+            preset_key,
+            config.selected_torch_variant,
+        )
+
         index_config = IndexConfig(
             project_root=self._paths.app_root,
             model_catalog=model_catalog,

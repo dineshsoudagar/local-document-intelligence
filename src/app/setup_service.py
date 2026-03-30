@@ -9,6 +9,7 @@ import subprocess
 import sys
 import threading
 import time
+import logging
 from collections.abc import Callable
 from dataclasses import dataclass
 from pathlib import Path
@@ -192,6 +193,14 @@ class SetupService:
             selected_generator_load_preset=generator_load_preset,
             selected_torch_variant=torch_variant,
         )
+        logging.getLogger(__name__).info(
+            "Setup requested generator_key=%s embedding_key=%s "
+            "generator_load_preset=%s torch_variant=%s",
+            generator_key,
+            embedding_key,
+            generator_load_preset,
+            torch_variant,
+        )
         return self._start_worker(config)
 
     def retry_install(self) -> SetupStatus:
@@ -211,6 +220,14 @@ class SetupService:
             embedding_key=retry_config.selected_embedding_key,
             generator_load_preset=retry_config.selected_generator_load_preset,
             torch_variant=retry_config.selected_torch_variant,
+        )
+        logging.getLogger(__name__).info(
+            "Setup retry requested generator_key=%s embedding_key=%s "
+            "generator_load_preset=%s torch_variant=%s",
+            retry_config.selected_generator_key,
+            retry_config.selected_embedding_key,
+            retry_config.selected_generator_load_preset,
+            retry_config.selected_torch_variant,
         )
         return self._start_worker(retry_config)
 
