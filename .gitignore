@@ -1,47 +1,66 @@
-# Directories
+# Runtime data and scratch space
 data/
-/data/pdfs/*.pdf
-/data/**/*.txt
-/data/**/*.txt
-/models/
-/commented_scripts/
-/storage/
-/build/
-/bundle/python/
-/bundle/wheels/
-__pycache__/
-.idea
-logs/
-node_modules/
+models/
+storage/
+artifacts/
+bundle/
+commented_scripts/
+test_scripts/
+.launch-dev/
+.tmp_test/
+test.json
+
+# Build outputs
+build/
 dist/
+build_builds/
+dist_builds/
+
+# Keep the prebuilt frontend because launch-app.ps1 and the PyInstaller specs
+# depend on a packaged UI even when npm is not available locally.
 !frontend/dist/
 !frontend/dist/**
-dist-ssr/
-test_venv/
-test_scripts/
-dist_builds/
-build/
-build_builds/
 
-# Files
+# Python
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.venv/
+venv/
+local_int_venv/
+test_venv/
+
+# Node / Vite
+node_modules/
+frontend/node_modules/
+frontend/.vite/
+frontend/.npm-cache/
+dist-ssr/
+*.tsbuildinfo
+
+# Logs and temporary diagnostics
+logs/
 *.log
-*.csv
-*.json
-*.local
-npm-debug.log*
-yarn-debug.log*
-yarn-error.log*
-pnpm-debug.log*
-lerna-debug.log*
+tmp_launch_dev_console.err
+tmp_launch_dev_console.out
+
+# Editor and OS metadata
+.idea/
+.vscode/
+.DS_Store
+Thumbs.db
 *.suo
 *.ntvs*
 *.njsproj
 *.sln
 *.sw?
+*.local
 
-# Other
-/=2.0.0
-.vscode/*
-!.vscode/extensions.json
-.DS_Store
-frontend/.npm-cache/*
+# Package-manager diagnostics
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+pnpm-debug.log*
+lerna-debug.log*

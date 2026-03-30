@@ -151,7 +151,10 @@ def query_documents(
     registry: DocumentRegistry = Depends(get_document_registry_from_state),
 ) -> QueryResponse:
     """Run a non-streaming grounded query and return the final answer payload."""
-    print(f"Received query: {request.query}, mode: {request.mode}, doc_ids: {request.doc_ids}, reasoning_mode: {request.reasoning_mode}")  # Debug log
+    print(
+        f"Received query: {request.query}, mode: {request.mode}, "
+        f"doc_ids: {request.doc_ids}, reasoning_mode: {request.reasoning_mode}"
+    )
     try:
         result = answer_service.answer(
             query=request.query,
@@ -182,7 +185,11 @@ def stream_query_documents(
     registry: DocumentRegistry = Depends(get_document_registry_from_state),
 ) -> StreamingResponse:
     """Stream query output as NDJSON events."""
-    print(f"Received query: {request.query}, mode: {request.mode}, doc_ids: {request.doc_ids}, reasoning_mode: {request.reasoning_mode}, stream_thinking: {request.stream_thinking}")  # Debug log      
+    print(
+        f"Received query: {request.query}, mode: {request.mode}, "
+        f"doc_ids: {request.doc_ids}, reasoning_mode: {request.reasoning_mode}, "
+        f"stream_thinking: {request.stream_thinking}"
+    )
     try:
         start_payload, event_stream = answer_service.stream(
             query=request.query,

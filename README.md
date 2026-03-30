@@ -55,9 +55,7 @@ It is designed to:
 
 ## 🚀 Installation
 
-For full setup instructions, see [installation.md](installation.md).
-
-For packaged downloads, use the latest release page once published.
+Packaged downloads should be published on the release page.
 
 <!--
 ### ⬇️ Packaged Windows Download
@@ -70,6 +68,10 @@ For packaged downloads, use the latest release page once published.
 ```powershell
 powershell -ExecutionPolicy Bypass -File .\launch-app.ps1
 ```
+
+The repository keeps `frontend/dist/` checked in because normal desktop startup
+and PyInstaller packaging both expect a prebuilt frontend. Rebuild it only when
+you change the UI.
 
 ---
 
