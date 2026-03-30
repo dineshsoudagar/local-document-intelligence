@@ -25,9 +25,11 @@ from src.app.paths import (
     AppPaths,
 )
 from src.app.python_runtime import (
+    ensure_embedded_python_runtime,
     hidden_windows_subprocess_kwargs,
     python_executable_is_usable,
     sanitized_subprocess_env,
+    sync_managed_venv_base_paths,
 )
 from src.app.runtime_state import load_managed_app_config
 
@@ -292,6 +294,34 @@ class BackendProcess:
         self._log_stream.write(f"[{time.strftime('%Y-%m-%d %H:%M:%S')}] {message}\n")
         self._log_stream.flush()
 
+    def _repair_managed_python(self) -> bool:
+        """Repair one managed venv that points at an expired onefile payload."""
+        pyvenv_cfg_path = self._paths.managed_venv_dir / "pyvenv.cfg"
+        bundled_python = self._paths.bundled_python_dir / "python.exe"
+        if not pyvenv_cfg_path.is_file() or not bundled_python.is_file():
+            return False
+
+        try:
+            embedded_python = ensure_embedded_python_runtime(
+                bundled_python_dir=self._paths.bundled_python_dir,
+                embedded_python_dir=self._paths.embedded_python_dir,
+            )
+            synced = sync_managed_venv_base_paths(
+                managed_venv_dir=self._paths.managed_venv_dir,
+                base_python_dir=embedded_python.parent,
+            )
+        except Exception as exc:
+            self._append_log(f"Managed runtime repair failed error={exc}")
+            return False
+
+        if synced:
+            self._append_log(
+                "Managed runtime repair completed "
+                f"managed_venv_dir={self._paths.managed_venv_dir} "
+                f"base_python={embedded_python}"
+            )
+        return synced
+
     def start(self) -> None:
         """Start the backend process if it is not already running."""
         self._start_backend(require_managed=False)
@@ -328,6 +358,8 @@ class BackendProcess:
         )
         if runtime_config.install_state == "ready" and managed_python.is_file():
             usable, detail = python_executable_is_usable(managed_python)
+            if not usable and self._repair_managed_python():
+                usable, detail = python_executable_is_usable(managed_python)
             if usable:
                 self._append_log(
                     "Selected backend runtime_mode=managed_subprocess "
@@ -645,5 +677,6 @@ def main() -> None:
 
 if __name__ == "__main__":
     main()
+
 
 

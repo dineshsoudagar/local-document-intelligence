@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import os
+import shutil
 import subprocess
 from collections.abc import Mapping
 from pathlib import Path
@@ -57,6 +58,79 @@ def hidden_windows_subprocess_kwargs() -> dict[str, Any]:
         "creationflags": getattr(subprocess, "CREATE_NO_WINDOW", 0),
         "startupinfo": startupinfo,
     }
+
+
+def ensure_embedded_python_runtime(
+    *,
+    bundled_python_dir: Path,
+    embedded_python_dir: Path,
+) -> Path:
+    """Persist the packaged bootstrap Python runtime into app storage."""
+    embedded_python = embedded_python_dir / "python.exe"
+    usable, _ = python_executable_is_usable(embedded_python)
+    if usable:
+        return embedded_python
+
+    bundled_python = bundled_python_dir / "python.exe"
+    if not bundled_python.is_file():
+        return embedded_python
+
+    if embedded_python_dir.exists():
+        shutil.rmtree(embedded_python_dir)
+
+    shutil.copytree(bundled_python_dir, embedded_python_dir)
+    return embedded_python
+
+
+def sync_managed_venv_base_paths(
+    *,
+    managed_venv_dir: Path,
+    base_python_dir: Path,
+) -> bool:
+    """Point one managed venv at a stable bootstrap Python runtime."""
+    pyvenv_cfg_path = managed_venv_dir / "pyvenv.cfg"
+    base_python = base_python_dir / "python.exe"
+    if not pyvenv_cfg_path.is_file() or not base_python.is_file():
+        return False
+
+    desired_values = {
+        "home": str(base_python_dir.resolve()),
+        "executable": str(base_python.resolve()),
+        "command": f"{base_python.resolve()} -m venv {managed_venv_dir.resolve()}",
+    }
+    seen_keys: set[str] = set()
+    changed = False
+    updated_lines: list[str] = []
+
+    for line in pyvenv_cfg_path.read_text(encoding="utf-8").splitlines():
+        stripped = line.strip()
+        matched = False
+        for key, value in desired_values.items():
+            prefix = f"{key} = "
+            if stripped.startswith(prefix):
+                new_line = f"{key} = {value}"
+                seen_keys.add(key)
+                if line != new_line:
+                    changed = True
+                updated_lines.append(new_line)
+                matched = True
+                break
+        if not matched:
+            updated_lines.append(line)
+
+    for key, value in desired_values.items():
+        if key in seen_keys:
+            continue
+        changed = True
+        updated_lines.append(f"{key} = {value}")
+
+    if changed:
+        pyvenv_cfg_path.write_text(
+            "\n".join(updated_lines) + "\n",
+            encoding="utf-8",
+        )
+
+    return True
 
 
 def python_executable_is_usable(

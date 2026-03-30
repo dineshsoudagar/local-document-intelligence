@@ -20,6 +20,7 @@ from src.app.paths import (
     AppPaths,
 )
 from src.app.python_runtime import (
+    ensure_embedded_python_runtime,
     hidden_windows_subprocess_kwargs,
     python_executable_is_usable,
     sanitized_subprocess_env,
@@ -716,10 +717,23 @@ class SetupService:
 
     def _resolve_bootstrap_python(self) -> Path:
         """Return the Python executable used to create the managed venv."""
+        embedded_python = self._paths.embedded_python_dir / "python.exe"
         bundled_python = self._paths.bundled_python_dir / "python.exe"
         if bundled_python.is_file():
-            return bundled_python
-        embedded_python = self._paths.embedded_python_dir / "python.exe"
+            embedded_python = ensure_embedded_python_runtime(
+                bundled_python_dir=self._paths.bundled_python_dir,
+                embedded_python_dir=self._paths.embedded_python_dir,
+            )
+            usable, detail = python_executable_is_usable(embedded_python)
+            if usable:
+                return embedded_python
+
+            detail_suffix = f": {detail}" if detail else ""
+            raise RuntimeError(
+                "Persistent bootstrap Python runtime is unusable after being copied "
+                f"from the packaged bundle{detail_suffix}"
+            )
+
         if embedded_python.is_file():
             return embedded_python
         if getattr(sys, "frozen", False):
