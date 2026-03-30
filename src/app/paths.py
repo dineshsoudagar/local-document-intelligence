@@ -14,6 +14,8 @@ APP_ROOT_ENV_VAR = "LDI_APP_ROOT"
 CODE_ROOT_ENV_VAR = "LDI_CODE_ROOT"
 BACKEND_RUNTIME_MODE_ENV_VAR = "LDI_BACKEND_RUNTIME_MODE"
 LAUNCHER_LOG_PATH_ENV_VAR = "LDI_LAUNCHER_LOG_PATH"
+FROZEN_CONTENTS_DIR = "app"
+LEGACY_FROZEN_CONTENTS_DIR = "_internal"
 
 
 def _can_prepare_directory(path: Path) -> bool:
@@ -26,6 +28,15 @@ def _can_prepare_directory(path: Path) -> bool:
         return True
     except OSError:
         return False
+
+
+def _resolve_frozen_contents_root(base_dir: Path) -> Path | None:
+    """Return the frozen payload directory when the app uses an onedir layout."""
+    for contents_dir_name in (FROZEN_CONTENTS_DIR, LEGACY_FROZEN_CONTENTS_DIR):
+        contents_dir = base_dir / contents_dir_name
+        if (contents_dir / "src").is_dir():
+            return contents_dir
+    return None
 
 
 def _default_app_root() -> Path:
@@ -58,9 +69,9 @@ def _default_code_root() -> Path:
     if configured:
         configured_path = Path(configured).expanduser().resolve()
         if getattr(sys, "frozen", False) and not (configured_path / "src").is_dir():
-            internal_dir = configured_path / "_internal"
-            if (internal_dir / "src").is_dir():
-                return internal_dir
+            frozen_contents_root = _resolve_frozen_contents_root(configured_path)
+            if frozen_contents_root is not None:
+                return frozen_contents_root
         return configured_path
 
     if getattr(sys, "frozen", False):
@@ -68,9 +79,9 @@ def _default_code_root() -> Path:
         if meipass:
             return Path(meipass).resolve()
         executable_dir = Path(sys.executable).resolve().parent
-        internal_dir = executable_dir / "_internal"
-        if (internal_dir / "src").is_dir():
-            return internal_dir
+        frozen_contents_root = _resolve_frozen_contents_root(executable_dir)
+        if frozen_contents_root is not None:
+            return frozen_contents_root
         return executable_dir
 
     return Path(__file__).resolve().parents[2]

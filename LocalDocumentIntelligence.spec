@@ -5,6 +5,7 @@ from PyInstaller.utils.hooks import collect_submodules
 
 
 project_root = Path(SPECPATH).resolve()
+onedir_contents_dir = "app"
 hiddenimports = collect_submodules("webview")
 excluded_runtime_packages = [
     "bitsandbytes",
@@ -72,6 +73,7 @@ exe = EXE(
     target_arch=None,
     codesign_identity=None,
     entitlements_file=None,
+    contents_directory=onedir_contents_dir,
 )
 
 coll = COLLECT(
