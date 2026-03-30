@@ -19,3 +19,4 @@ hf_xet
 python-multipart
 fastembed
 accelerate
+pywebview>=5.1

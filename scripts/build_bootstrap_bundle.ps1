@@ -9,8 +9,9 @@ $ProjectRoot = (Resolve-Path (Join-Path $PSScriptRoot "..")).Path
 $BundleRoot = Join-Path $ProjectRoot "bundle"
 $BundlePythonDir = Join-Path $BundleRoot "python"
 $WheelhouseDir = Join-Path $BundleRoot "wheels"
-$OnedirSpecPath = Join-Path $ProjectRoot "LocalDocumentIntelligence.spec"
-$OnefileSpecPath = Join-Path $ProjectRoot "LocalDocumentIntelligence.onefile.spec"
+$BuildSpecsRoot = Join-Path $ProjectRoot "build_specs"
+$OnedirSpecPath = Join-Path $BuildSpecsRoot "LocalDocumentIntelligence.spec"
+$OnefileSpecPath = Join-Path $BuildSpecsRoot "LocalDocumentIntelligence.onefile.spec"
 
 function Get-PythonInstallRoot {
     param(
@@ -93,7 +94,7 @@ try {
         throw "Failed to upgrade pip."
     }
 
-    & $Python -m pip install -r requirements.txt -r requirements-launcher.txt pyinstaller
+    & $Python -m pip install -r requirements.txt pyinstaller
     if ($LASTEXITCODE -ne 0) {
         throw "Failed to install launcher build dependencies."
     }

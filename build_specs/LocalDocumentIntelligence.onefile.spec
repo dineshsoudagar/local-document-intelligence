@@ -4,7 +4,7 @@ from pathlib import Path
 from PyInstaller.utils.hooks import collect_submodules
 
 
-project_root = Path(SPECPATH).resolve()
+project_root = Path(SPECPATH).resolve().parent
 hiddenimports = collect_submodules("webview")
 excluded_runtime_packages = [
     "bitsandbytes",
@@ -42,7 +42,6 @@ a = Analysis(
         (str(project_root / "scripts"), "scripts"),
         (str(project_root / "src"), "src"),
         (str(project_root / "requirements.txt"), "."),
-        (str(project_root / "requirements-launcher.txt"), "."),
     ],
     hiddenimports=hiddenimports,
     hookspath=[],
