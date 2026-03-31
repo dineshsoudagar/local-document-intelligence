@@ -66,8 +66,8 @@ GENERATOR_LOAD_PRESETS: dict[str, GeneratorLoadPreset] = {
     "bnb_8bit": GeneratorLoadPreset(
         key="bnb_8bit",
         label="8-bit (bnb)",
-        description="8-bit loading that cuts VRAM by roughly 35% to 45% compared with standard mode.",
-        memory_hint="~35% to 45% lower VRAM than standard, with a modest quality tradeoff.",
+        description="8-bit loading that cuts VRAM by approximately 20% to 25% compared with standard mode.",
+        memory_hint="Approx. 20% to 25% lower VRAM than standard, with a modest quality tradeoff.",
         generator_load_mode="bnb_8bit",
         generator_dtype="bfloat16",
         generator_device_map="auto",
@@ -75,8 +75,8 @@ GENERATOR_LOAD_PRESETS: dict[str, GeneratorLoadPreset] = {
     "bnb_4bit": GeneratorLoadPreset(
         key="bnb_4bit",
         label="4-bit (bnb)",
-        description="4-bit NF4 loading that cuts VRAM by roughly 55% to 65% compared with standard mode.",
-        memory_hint="~55% to 65% lower VRAM than standard, with a larger quality tradeoff.",
+        description="4-bit NF4 loading that cuts VRAM by up to 40% compared with standard mode.",
+        memory_hint="Up to 40% lower VRAM than standard, with a larger quality tradeoff.",
         generator_load_mode="bnb_4bit",
         generator_dtype="bfloat16",
         generator_device_map="auto",

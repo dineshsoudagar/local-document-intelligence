@@ -132,7 +132,7 @@ class ModelCatalog:
                 label="Qwen3 4B",
                 description="Official post-trained Qwen3 4B generator for general local use.",
                 size_hint="4B",
-                vram_hint="~9-10 GB VRAM in standard mode",
+                vram_hint="Up to 12 GB VRAM",
             ),
             ModelEntry(
                 key="qwen3_4b_instruct_2507",
@@ -143,7 +143,7 @@ class ModelCatalog:
                 label="Qwen3 4B Instruct 2507",
                 description="Instruction-tuned generator optimized for grounded answers.",
                 size_hint="4B",
-                vram_hint="~9-10 GB VRAM in standard mode",
+                vram_hint="Up to 12 GB VRAM",
             ),
             ModelEntry(
                 key="qwen3_1_7b",
@@ -154,7 +154,7 @@ class ModelCatalog:
                 label="Qwen3 1.7B",
                 description="Official post-trained Qwen3 1.7B generator for mid-tier GPUs.",
                 size_hint="1.7B",
-                vram_hint="~5-6 GB VRAM in standard mode",
+                vram_hint="Up to 7 GB VRAM",
             ),
             ModelEntry(
                 key="qwen3_0_6b",
@@ -165,7 +165,7 @@ class ModelCatalog:
                 label="Qwen3 0.6B",
                 description="Official post-trained Qwen3 0.6B generator for constrained GPUs.",
                 size_hint="0.6B",
-                vram_hint="~3-4 GB VRAM in standard mode",
+                vram_hint="Up to 4 GB VRAM",
             ),
         )
     )

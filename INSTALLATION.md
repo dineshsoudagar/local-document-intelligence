@@ -1,6 +1,10 @@
 # 🚀 Installation
 
+
 This guide is for the packaged Windows release of **Local Document Intelligence**.
+
+- [Download the latest Windows release](https://github.com/dineshsoudagar/local-document-intelligence/releases/latest)
+- [View the v1.0.0 release notes](https://github.com/dineshsoudagar/local-document-intelligence/releases/tag/v1.0.0)
 
 ## 1. Download and open the Windows EXE
 

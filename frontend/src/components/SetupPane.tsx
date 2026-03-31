@@ -48,14 +48,14 @@ function generatorRuntimeGuide(
       };
     case "bnb_8bit":
       return {
-        memoryShift: "~35% to 45% lower VRAM than standard",
+        memoryShift: "Approx. 20% to 25% lower VRAM than standard",
         recommendation: isRecommended
           ? `Recommended for ${detectedGpu}. Moderate VRAM reduction with a smaller quality tradeoff than 4-bit.`
           : "Moderate VRAM reduction with a smaller quality tradeoff than 4-bit.",
       };
     case "bnb_4bit":
       return {
-        memoryShift: "~55% to 65% lower VRAM than standard",
+        memoryShift: "Up to 40% lower VRAM than standard",
         recommendation: isRecommended
           ? `Recommended for ${detectedGpu}. Largest VRAM reduction on CUDA, with a bigger quality tradeoff.`
           : "Largest VRAM reduction on CUDA, with a bigger quality tradeoff.",

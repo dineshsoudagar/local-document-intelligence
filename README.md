@@ -2,7 +2,7 @@
 
 A fully local document intelligence system for building a private document workspace with persistent indexing, hybrid retrieval, reranking, and grounded answer generation over local models.
 
-Documents stay on disk, retrieval runs against a local Qdrant index, and answer generation runs through locally loaded models. The system is designed for packaged end-user use as well as source-based local development.
+Documents stay on disk, retrieval runs against a local Qdrant index, and answer generation runs through locally loaded models. The system is designed for packaged end-user use, while still supporting local development of the application stack.
 
 ---
 
@@ -15,19 +15,7 @@ Documents stay on disk, retrieval runs against a local Qdrant index, and answer 
 - 🧠 Generate grounded answers from local models
 - ⚡ Choose between smaller and larger Qwen model options based on hardware
 
-<!--
-## ⬇️ Latest Release
-
-- [Download the latest Windows EXE](#)
-- [View the latest release notes](#)
-
-### ✨ Release Highlights
-
-- Added support for Qwen 0.6B and Qwen 1.7B
-- Broadened support across lower-memory, mid-range, and higher-end PCs
-- Added packaged Windows EXE distribution for easier installation
--->
-
+---
 
 ## 🎬 Demo
 
@@ -39,23 +27,11 @@ Documents stay on disk, retrieval runs against a local Qdrant index, and answer 
 
 ## 🚀 Installation
 
-Packaged downloads should be published on the release page.
+Download the packaged Windows EXE from the latest release:
 
-<!--
-### ⬇️ Packaged Windows Download
+- [Download the packaged Windows EXE](https://github.com/dineshsoudagar/local-document-intelligence/releases/latest)
 
-[Download the latest Windows EXE](#)
--->
-
-### ▶️ Run from source
-
-```powershell
-powershell -ExecutionPolicy Bypass -File .\launch-app.ps1
-```
-
-The repository keeps `frontend/dist/` checked in because normal desktop startup
-and PyInstaller packaging both expect a prebuilt frontend. Rebuild it only when
-you change the UI.
+For step-by-step setup instructions, see [INSTALLATION.md](INSTALLATION.md).
 
 ---
 
@@ -64,16 +40,16 @@ you change the UI.
 ### Generator Models
 
 - `Qwen/Qwen3-4B`  
-  **More than 8 GB VRAM.** Best for users who want the strongest reasoning-focused model for deeper analysis, more complex instructions, and higher-quality thinking.
+  **Recommended for 8 GB+ VRAM.** Best for users who want the strongest reasoning-focused model for deeper analysis, more complex instructions, and higher-quality thinking.
 
 - `Qwen/Qwen3-4B-Instruct-2507`  
-  **More than 8 GB VRAM.** Best for users who want a polished, instruction-following experience for everyday document Q and A, summarization, and general use.
+  **Recommended for 8 GB+ VRAM.** Best for users who want a polished, instruction-following experience for everyday document Q and A, summarization, and general use.
 
 - `Qwen 1.7B`  
-  **Less than 8 GB VRAM.** Best for users who want a balanced experience with good responsiveness and solid general document interaction, with slightly lower capability on harder tasks than the 4B models.
+  **Recommended for up to 7 GB VRAM.** Best for users who want a balanced experience with good responsiveness and solid general document interaction, with slightly lower capability on harder tasks than the 4B models.
 
 - `Qwen 0.6B`  
-  **Less than 4 GB VRAM.** Best for users who want the lightest setup for constrained hardware and basic document interaction, with lower performance on more complex tasks.
+  **Recommended for up to 4 GB VRAM.** Best for users who want the lightest setup for constrained hardware and basic document interaction, with lower performance on more complex tasks.
 
 ### VRAM Guidance
 
@@ -93,23 +69,23 @@ These options are intended to improve compatibility on constrained systems, with
 
 ---
 
-## 🔀 Query Experience
+## 🔀 Query Experience (Modes)
 
 The system supports four user-facing query modes:
 
-### Auto
+### **Auto**
 
 Auto mode decides whether a request should be handled as direct assistant chat or as document-grounded retrieval.
 
-### Chat
+### **Chat**
 
 Chat mode skips retrieval and responds directly as a local assistant.
 
-### Corpus
+### **Corpus**
 
 Corpus mode searches across the full indexed document workspace and generates an answer from the retrieved evidence.
 
-### Single Document
+### **Single Document**
 
 Single Document mode restricts retrieval to one selected document and generates an answer only from that document’s evidence.
 
@@ -129,6 +105,19 @@ At a high level, the system does the following:
 8. Generate a supported answer or decline unsupported claims instead of guessing
 9. Return citations, source references, and timing data
 
+---
+
+## 🛠️ Frontend Development
+
+The built frontend is already used for normal application startup.
+
+Only use development mode if you are working on the UI.
+
+### ▶️ Run in development mode
+
+```powershell
+powershell -ExecutionPolicy Bypass -File .\launch-dev.ps1
+```
 ---
 
 ## 🏗️ Tech Stack
