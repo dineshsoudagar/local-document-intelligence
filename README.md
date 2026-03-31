@@ -32,7 +32,7 @@ Documents stay on disk, retrieval runs against a local Qdrant index, and answer 
 ## 🎬 Demo
 
 <p align="center">
-  <img src="src/assests/demo.gif" alt="App UI Demo" width="90%" style="margin: 1%;" />
+  <img src="src/assets/demo.gif" alt="App UI Demo" width="90%" style="margin: 1%;" />
 </p>
 
 ---
