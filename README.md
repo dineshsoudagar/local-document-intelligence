@@ -14,7 +14,6 @@ Documents stay on disk, retrieval runs against a local Qdrant index, and answer 
 - 📑 Restrict search to a single selected document
 - 🧠 Generate grounded answers from local models
 - ⚡ Choose between smaller and larger Qwen model options based on hardware
-- 💾 Keep documents, indexes, and models local on disk
 
 <!--
 ## ⬇️ Latest Release
@@ -29,21 +28,6 @@ Documents stay on disk, retrieval runs against a local Qdrant index, and answer 
 - Added packaged Windows EXE distribution for easier installation
 -->
 
----
-
-## 🧭 What the Product Does
-
-Local Document Intelligence lets users build a private local document workspace and query it with grounded answers backed by retrieved evidence.
-
-It is designed to:
-
-- ingest and store documents locally
-- persist indexing across sessions
-- retrieve evidence from one document or the full corpus
-- rerank evidence before answer generation
-- generate answers with local models instead of cloud services
-
----
 
 ## 🎬 Demo
 
@@ -79,17 +63,21 @@ you change the UI.
 
 ### Generator Models
 
-- `Qwen 0.6B`  
-  Best for CPU-only fallback and very low-memory systems. CPU-only use is supported, but not recommended for normal use because it will be slow.
-
-- `Qwen 1.7B`  
-  Best for broader compatibility on lower-memory and mid-range machines.
-
 - `Qwen/Qwen3-4B`  
-  Best for balanced local use on machines with around 8 GB VRAM.
+  **More than 8 GB VRAM.** Best for users who want the strongest reasoning-focused model for deeper analysis, more complex instructions, and higher-quality thinking.
 
 - `Qwen/Qwen3-4B-Instruct-2507`  
-  Best for stronger local setups with around 8 GB VRAM or better for a more comfortable experience.
+  **More than 8 GB VRAM.** Best for users who want a polished, instruction-following experience for everyday document Q and A, summarization, and general use.
+
+- `Qwen 1.7B`  
+  **Less than 8 GB VRAM.** Best for users who want a balanced experience with good responsiveness and solid general document interaction, with slightly lower capability on harder tasks than the 4B models.
+
+- `Qwen 0.6B`  
+  **Less than 4 GB VRAM.** Best for users who want the lightest setup for constrained hardware and basic document interaction, with lower performance on more complex tasks.
+
+### VRAM Guidance
+
+Higher-VRAM systems can use the 4B models for the strongest overall experience, while lower-VRAM systems can use the smaller models for a lighter and more accessible local setup.
 
 ### 🔎 Retrieval and Pipeline Models
 
@@ -97,29 +85,17 @@ you change the UI.
 - Reranking: `Qwen/Qwen3-Reranker-0.6B`
 - Sparse retrieval: `Qdrant/bm25`
 
-### 💻 Hardware Support
-
-The application is designed to support a broad range of PCs by allowing smaller and larger model choices.
-
-- Lower-end systems can use `Qwen 0.6B`
-- Mid-range systems are better suited for `Qwen 1.7B`
-- More capable systems can use the `4B` models for better answer quality
-
-CPU-only use is supported with the smaller model path, but it is mainly a compatibility option and will be noticeably slower.
-
 ### ⚙️ Low-Memory Runtime Options
 
 Lower-memory setups can use configurable bitsandbytes loading options, including reduced-memory configurations such as 4-bit and 8-bit loading where enabled in the application setup.
 
 These options are intended to improve compatibility on constrained systems, with the usual tradeoff of reduced speed or output quality compared with stronger GPU setups.
 
-All models are stored locally under `models/`.
-
 ---
 
 ## 🔀 Query Experience
 
-The system supports three user-facing interaction patterns:
+The system supports four user-facing query modes:
 
 ### Auto
 
@@ -129,11 +105,13 @@ Auto mode decides whether a request should be handled as direct assistant chat o
 
 Chat mode skips retrieval and responds directly as a local assistant.
 
-### Grounded Document Answering
+### Corpus
 
-Grounded mode retrieves evidence from the local index and produces a cited answer from the retrieved context.
+Corpus mode searches across the full indexed document workspace and generates an answer from the retrieved evidence.
 
-In the UI, this can be used across the full corpus or restricted to selected documents.
+### Single Document
+
+Single Document mode restricts retrieval to one selected document and generates an answer only from that document’s evidence.
 
 ---
 
