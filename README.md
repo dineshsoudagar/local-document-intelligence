@@ -6,6 +6,10 @@ Documents stay on disk, retrieval runs against a local Qdrant index, and answer 
 
 ---
 
+[![EXE downloads](https://img.shields.io/github/downloads/dineshsoudagar/local-document-intelligence/LocalDocumentIntelligence.exe?logo=github&label=EXE%20downloads)](https://github.com/dineshsoudagar/local-document-intelligence/releases)
+
+---
+
 ## ✨ Features
 
 - 📄 Upload and store PDF documents locally
